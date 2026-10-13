@@ -97,12 +97,46 @@ always included.
 - **External**: `curl -X POST "https://YOUR_HOST/api/trigger?categories=health,environment&count=1" -H "X-Trigger-Key: $TRIGGER_SECRET"`
   from cron-job.org, GitHub Actions, etc. Add `&dry_run=true` to preview.
 
-## Deploy
+## Deploy (always-on Linux VM, no Docker)
 
-Use the `Dockerfile` on Render / Railway / Fly.io. Set the `.env` variables as service env vars,
-mount a persistent volume at `/data` (history and the refreshed token live in `/data/bot.db`), and
-run a single instance. The app must stay awake for Telegram polling and the scheduler, so use a
-host that doesn't sleep (a small VPS, Fly.io, Railway) or ping `/healthz` to keep a free one awake.
+The app must stay awake for Telegram polling and the posting loop, and needs a disk that persists
+(`bot.db` holds the posted history and the refreshed Threads token). A free Google Cloud `e2-micro`
+VM (Debian 12, 30 GB standard disk, region us-west1 / us-central1 / us-east1) fits; run exactly one
+instance, and stop any copy running on your PC first.
+
+```bash
+sudo apt-get update && sudo apt-get install -y git python3-venv python3-pip
+git clone https://github.com/VooreCharan/Threads_Post_Automation.git
+cd Threads_Post_Automation
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+nano .env        # your settings (see .env.example); never commit this file
+```
+
+Create `/etc/systemd/system/threads-bot.service` (replace `YOURUSER`):
+
+```ini
+[Unit]
+Description=News to Threads bot
+After=network-online.target
+
+[Service]
+User=YOURUSER
+WorkingDirectory=/home/YOURUSER/Threads_Post_Automation
+ExecStart=/home/YOURUSER/Threads_Post_Automation/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl enable --now threads-bot
+journalctl -u threads-bot -f      # look for "Telegram bot polling started"
+```
+
+Update later with `git pull && sudo systemctl restart threads-bot`. Hosts whose free tier sleeps or
+has no persistent disk (e.g. Render free) are not suitable.
 
 ## Notes
 
