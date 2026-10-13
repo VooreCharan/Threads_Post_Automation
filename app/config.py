@@ -66,6 +66,10 @@ THREADS_ACCESS_TOKEN = _env("THREADS_ACCESS_TOKEN")  # long-lived token, used to
 TRIGGER_SECRET = _env("TRIGGER_SECRET")
 
 DB_PATH = _env("DB_PATH", "bot.db")
+# Optional: keep state in a Turso database instead of a local file (for hosts without a persistent
+# disk, e.g. Render free). TURSO_URL looks like libsql://mydb-myorg.turso.io
+TURSO_URL = _env("TURSO_URL").replace("libsql://", "https://", 1).rstrip("/")
+TURSO_TOKEN = _env("TURSO_TOKEN")
 
 # Only post stories that are mainly about India (events/places in India, Indian government, people,
 # companies, markets, sport or culture). Stories mainly about other countries are skipped.

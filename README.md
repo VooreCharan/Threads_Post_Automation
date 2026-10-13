@@ -97,46 +97,31 @@ always included.
 - **External**: `curl -X POST "https://YOUR_HOST/api/trigger?categories=health,environment&count=1" -H "X-Trigger-Key: $TRIGGER_SECRET"`
   from cron-job.org, GitHub Actions, etc. Add `&dry_run=true` to preview.
 
-## Deploy (always-on Linux VM, no Docker)
+## Deploy (free, no card): Render + Turso + UptimeRobot
 
-The app must stay awake for Telegram polling and the posting loop, and needs a disk that persists
-(`bot.db` holds the posted history and the refreshed Threads token). A free Google Cloud `e2-micro`
-VM (Debian 12, 30 GB standard disk, region us-west1 / us-central1 / us-east1) fits; run exactly one
-instance, and stop any copy running on your PC first.
+Render's free web service has no persistent disk and sleeps after 15 minutes without traffic, so:
+**Turso** (free hosted SQLite) keeps the bot's state (posted history, settings, refreshed Threads
+token), and **UptimeRobot** pings `/healthz` every 5 minutes to keep Render awake.
 
-```bash
-sudo apt-get update && sudo apt-get install -y git python3-venv python3-pip
-git clone https://github.com/VooreCharan/Threads_Post_Automation.git
-cd Threads_Post_Automation
-python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-nano .env        # your settings (see .env.example); never commit this file
-```
+1. **Turso**: sign up at https://turso.tech, create a database (e.g. `threads-bot`), then copy its URL
+   (`libsql://threads-bot-<org>.turso.io`) and create a token (database page -> *Create token*).
+2. *(Optional, keeps your history and token)* copy your local `bot.db` into Turso:
+   ```powershell
+   $env:TURSO_URL = "libsql://threads-bot-<org>.turso.io"; $env:TURSO_TOKEN = "<token>"
+   python -m app.cli --migrate-db bot.db
+   ```
+3. **Render**: https://render.com -> sign up with GitHub -> *New* -> *Web Service* -> pick this repo.
+   Build command `pip install -r requirements.txt`; start command
+   `uvicorn app.main:app --host 0.0.0.0 --port $PORT`; instance type **Free**. Add every value from
+   your local `.env` as an environment variable, plus `TURSO_URL` and `TURSO_TOKEN`. Do not set `DB_PATH`.
+4. **UptimeRobot**: https://uptimerobot.com -> *Add monitor* -> HTTP(s) -> URL
+   `https://<your-service>.onrender.com/healthz`, interval 5 minutes.
+5. Stop any copy running on your PC (two copies would fight over the Telegram bot), then in Telegram
+   send `status`, `post now`, `start posting`.
 
-Create `/etc/systemd/system/threads-bot.service` (replace `YOURUSER`):
-
-```ini
-[Unit]
-Description=News to Threads bot
-After=network-online.target
-
-[Service]
-User=YOURUSER
-WorkingDirectory=/home/YOURUSER/Threads_Post_Automation
-ExecStart=/home/YOURUSER/Threads_Post_Automation/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000
-Restart=always
-RestartSec=5
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl daemon-reload && sudo systemctl enable --now threads-bot
-journalctl -u threads-bot -f      # look for "Telegram bot polling started"
-```
-
-Update later with `git pull && sudo systemctl restart threads-bot`. Hosts whose free tier sleeps or
-has no persistent disk (e.g. Render free) are not suitable.
+Without `TURSO_URL`/`TURSO_TOKEN` the bot uses the local `bot.db` file. Any always-on Linux VM with a
+disk also works: create a Python venv, `pip install -r requirements.txt`, and run
+`uvicorn app.main:app --host 127.0.0.1 --port 8000` under systemd (`Restart=always`).
 
 ## Notes
 

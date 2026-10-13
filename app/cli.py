@@ -14,7 +14,17 @@ def main() -> None:
     p.add_argument("--count", type=int, default=0, help="posts this run (default POSTS_PER_RUN)")
     p.add_argument("--dry-run", action="store_true", help="generate posts but do not publish")
     p.add_argument("--check-llm", action="store_true", help="test every configured AI provider/model")
+    p.add_argument("--migrate-db", metavar="SQLITE_FILE",
+                   help="copy history/settings from a local bot.db into the Turso database in .env")
     args = p.parse_args()
+
+    if args.migrate_db:
+        if not state.use_turso():
+            print("Set TURSO_URL and TURSO_TOKEN in .env first.")
+            return
+        state.init()
+        print("Copied:", state.import_from_sqlite(args.migrate_db))
+        return
 
     if args.check_llm:
         from . import llm
