@@ -9,6 +9,7 @@ from . import bot, config, state, telegram_bot
 from .sources import FEEDS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+logging.getLogger("apscheduler").setLevel(logging.WARNING)  # hide the 10-second heartbeat lines
 scheduler = BackgroundScheduler()
 
 
@@ -28,12 +29,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="News -> Threads agent", lifespan=lifespan)
 
 
-@app.get("/healthz")
+@app.api_route("/healthz", methods=["GET", "HEAD"])  # HEAD: uptime monitors use it
 def healthz():
     return {"ok": True}
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def status():
     return {
         "categories": list(FEEDS),
