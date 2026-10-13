@@ -1,0 +1,112 @@
+# News → Threads agent (all free)
+
+Pulls fresh **Indian** headlines from free RSS feeds (8 categories, 31 feeds from The Hindu, Times of
+India, NDTV, Indian Express, Hindustan Times, Mint, Economic Times, Scroll, Gadgets 360 and NDTV
+Sports). A chain of free AI providers (Groq, NVIDIA, Gemini, OpenRouter, ...) writes a short original
+post with a source credit, and the bot publishes it to your Threads account through the official
+Threads API, with the article's own image or a relevant free stock photo when available. You start and
+stop it from Telegram.
+
+```
+app/sources.py       Indian RSS feeds by category (edit to add/remove)
+app/feeds.py         fetch, de-duplicate, filter by age and India keywords
+app/llm.py           AI provider chain: writes the post, checks it is about India, judges photos
+app/images.py        article image, or a relevant stock photo (Pexels / Pixabay / Unsplash)
+app/threads.py       Threads API publish + automatic token refresh
+app/bot.py           the posting loop: picks stories, publishes with random gaps, daily limit
+app/telegram_bot.py  "start posting" / "stop posting" / "post now" / "status" from Telegram
+app/state.py         SQLite: posted/skipped stories, settings, refreshed token
+app/main.py          FastAPI app: /healthz, status, POST /api/trigger, scheduler heartbeat
+app/cli.py           command line: dry runs and --check-llm
+```
+
+Categories: india, business, technology, sports, entertainment, health, science, environment.
+
+**India only**: stories mainly about other countries are never posted. Mixed feeds are pre-filtered
+by India keywords, and the AI writer then confirms each story is mainly about India (set
+`INDIA_ONLY=false` to turn the check off). Rejected stories are remembered and not re-checked.
+
+## One-time setup
+
+1. **Gemini key** (free): https://aistudio.google.com/apikey
+2. **Threads API** (free): at https://developers.facebook.com create an app, add the *Threads API*
+   use case, and add your Threads account as a Threads Tester (accept the invite in Threads under
+   Settings → Account → Website permissions). Generate a user token with `threads_basic` and
+   `threads_content_publish`, exchange it for a **long-lived token** (60 days), and note your
+   Threads user ID. The app refreshes the token automatically.
+3. `cp .env.example .env` and fill in `GEMINI_API_KEY`, `THREADS_USER_ID`, `THREADS_ACCESS_TOKEN`,
+   and a random `TRIGGER_SECRET`.
+
+## Run
+
+```
+pip install -r requirements.txt
+python -m app.cli --dry-run --categories health,technology   # preview, posts nothing
+python -m app.cli --count 2                                   # really post 2
+uvicorn app.main:app                                          # web service
+```
+
+## AI providers (free fallback chain)
+
+Posts are written by the first provider in `LLM_CHAIN` that works. Any provider whose key is blank
+is skipped, and one that is overloaded or rate-limited is skipped for a few minutes, so a flaky
+model doesn't slow every post. Test everything with `python -m app.cli --check-llm`.
+
+| Provider | Get a free key | `.env` key | Notes |
+|---|---|---|---|
+| Gemini | https://aistudio.google.com/apikey | `GEMINI_API_KEY` | Free tier is small and often overloaded |
+| Groq | https://console.groq.com/keys | `GROQ_API_KEY` | Fast; ~30 requests/min, 1,000+/day per model |
+| NVIDIA | https://build.nvidia.com (sign in, Settings → API Keys; needs phone verification) | `NVIDIA_API_KEY` | ~40 requests/min across all models; use non-reasoning instruct models |
+| OpenRouter | https://openrouter.ai/keys | `OPENROUTER_API_KEY` | `:free` models, ~20/min and ~50/day |
+| Hugging Face | https://huggingface.co/settings/tokens (fine-grained, *Inference Providers* permission) | `HF_TOKEN` | Free monthly credits are small; best as a late fallback |
+| GitHub Models | https://github.com/settings/tokens (token with *models* access) | `GITHUB_MODELS_TOKEN` | Low daily limits; optional |
+
+Free limits and model names change often. If a model stops working, set a new one in `.env`
+(`GROQ_MODELS`, `NVIDIA_MODELS`, `OPENROUTER_MODELS`, `HF_MODELS`, `GITHUB_MODELS`,
+`GEMINI_MODEL`, `GEMINI_FALLBACK_MODELS`; comma-separated lists are tried in order). To make
+another provider the first choice, reorder `LLM_CHAIN`, e.g. `LLM_CHAIN=groq,gemini,openrouter`.
+
+## Images
+
+Every post tries to carry a picture, in this order (`IMAGE_MODE=auto`):
+
+1. **The article's own image** (its `og:image`, or the RSS picture): a JPEG/PNG of at least
+   `IMAGE_MIN_WIDTH` (600 px), not a logo or placeholder.
+2. **A relevant free stock photo**, only when the story has a concrete photographable subject (the AI
+   writer proposes a search phrase such as "solar panels"; stories about people, politics, crime or
+   specific events get none). Candidates from Pexels / Pixabay / Unsplash are then judged by their
+   descriptions and used only if one clearly matches; otherwise nothing is used. The post credits the
+   photographer.
+3. **No image**: a normal text post with a link preview. This also happens whenever Threads rejects an
+   image, so a post is never lost.
+
+Free stock-photo keys (all free, no card): Pexels https://www.pexels.com/api/ (`PEXELS_API_KEY`),
+Pixabay https://pixabay.com/api/docs/ (`PIXABAY_API_KEY`), Unsplash https://unsplash.com/developers
+(`UNSPLASH_ACCESS_KEY`, demo apps are limited to 50 requests/hour). Providers without a key are skipped.
+
+Other modes: `IMAGE_MODE=article` (article photos only), `stock` (stock only), `off` (text only).
+Reusing a publisher's photo is subject to their copyright and terms; the link back to the source is
+always included.
+
+## Triggers
+
+- **Telegram (main control)**: message your bot **start posting** and it posts continuously, one post at a time with a random 30-60 s gap (`POST_GAP_MIN_SECONDS` / `POST_GAP_MAX_SECONDS`), until you send **stop posting** (the post in progress finishes, then it replies with the session total). Also: **post now**, **status**. A Telegram message is sent for every post (`NOTIFY_EVERY=1`; raise it to get fewer). It pauses automatically near Threads' 250-posts-per-24h limit and resumes by itself. The on/off state survives restarts.
+  Setup: create a bot with [@BotFather](https://t.me/BotFather) → put the token in
+  `TELEGRAM_BOT_TOKEN`; start the app, send the bot any message, and it replies with your user id →
+  put that in `TELEGRAM_OWNER_ID` and restart. Only that id can control the bot.
+- **External**: `curl -X POST "https://YOUR_HOST/api/trigger?categories=health,environment&count=1" -H "X-Trigger-Key: $TRIGGER_SECRET"`
+  from cron-job.org, GitHub Actions, etc. Add `&dry_run=true` to preview.
+
+## Deploy
+
+Use the `Dockerfile` on Render / Railway / Fly.io. Set the `.env` variables as service env vars,
+mount a persistent volume at `/data` (history and the refreshed token live in `/data/bot.db`), and
+run a single instance. The app must stay awake for Telegram polling and the scheduler, so use a
+host that doesn't sleep (a small VPS, Fly.io, Railway) or ping `/healthz` to keep a free one awake.
+
+## Notes
+
+- Threads allows 250 API posts per 24 hours per profile; text posts are limited to 500 characters.
+- Only headlines and short summaries are used; posts are rewritten by the model and always credit
+  and link the source. Review each publisher's terms before running at high volume.
+- Serving other people (multi-user) requires Meta app review for `threads_content_publish`.
