@@ -23,6 +23,9 @@ HTTP_TIMEOUT = 60
 
 PROMPT = """You run a news account on Threads. Write a post about the article below, using ONLY
 facts stated in it. Put it in your own words (do not copy sentences).
+Be exact about WHO said or did WHAT: never give a quote, opinion or action to the wrong person (the
+subject of a story is often not the person speaking). If you are unsure who said something, state the
+facts without attributing them, and do not add details that the article does not contain.
 
 Return ONLY a JSON object: {{"india": true, "post": "...", "topic": "...", "photo_query": "..."}}
 - india: true ONLY if the story is mainly about India: events or places in India, the Indian government

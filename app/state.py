@@ -162,6 +162,11 @@ def recent_posts(limit: int = 10) -> list[tuple]:
         return []
 
 
+def last_post_time() -> float | None:
+    with _lock:
+        return max(_post_times) if _post_times else None
+
+
 def posts_in_window(seconds: float) -> tuple[int, float | None]:
     """(number of posts in the last `seconds`, timestamp of the oldest of them)."""
     cutoff = time.time() - seconds

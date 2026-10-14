@@ -1,4 +1,4 @@
-"""The agent: pick fresh unposted news across categories, write posts, publish to Threads."""
+"""The agent: find the latest unposted Indian story in a category, write a post, publish to Threads."""
 import logging
 import random
 import threading
@@ -11,37 +11,27 @@ logger = logging.getLogger(__name__)
 _run_lock = threading.Lock()
 
 
-def posting_enabled() -> bool:
-    flag = state.get("posting_enabled")
-    return config.AUTO_START if flag is None else flag == "1"
-
-
-def set_posting(on: bool) -> None:
-    was_on = posting_enabled()
-    state.put("posting_enabled", "1" if on else "0")
-    if on:
-        state.put("next_post_at", "0")  # post as soon as the next heartbeat runs
-        if not was_on:
-            state.put("limit_notified", "0")
-            state.put("session_posts", "0")  # new session: count posts from zero
-
-
-def session_posts() -> int:
-    """Posts published by the current/last start-posting session."""
-    return int(state.get("session_posts") or 0)
-
-
 def is_busy() -> bool:
     return _run_lock.locked()
 
 
-def wait_until_idle() -> None:
-    """Block until any in-progress run has finished its current post."""
-    with _run_lock:
-        pass
+def blocked_reason() -> str | None:
+    """Why posting is not allowed right now (daily cap or minimum pause), or None if it is fine.
+    Protects the account from a flood of commands."""
+    n, oldest = state.posts_in_window(24 * 3600)
+    if n >= config.DAILY_POST_LIMIT and oldest is not None:
+        resume = time.strftime("%H:%M", time.localtime(oldest + 24 * 3600 + 60))
+        return (f"Daily limit reached ({n}/{config.DAILY_POST_LIMIT} posts in the last 24 hours). "
+                f"Try again after about {resume}.")
+    last = state.last_post_time()
+    if last is not None:
+        wait = config.MIN_SECONDS_BETWEEN_POSTS - (time.time() - last)
+        if wait > 0:
+            return f"Please wait {int(wait) + 1} more seconds before the next post."
+    return None
 
 
-def _image_label(r: dict) -> str:
+def image_label(r: dict) -> str:
     return {"article": "🖼 article image", "stock": "📷 stock photo"}.get(r.get("image"), "📝 text only")
 
 
@@ -50,72 +40,19 @@ def format_results(results: list[dict]) -> str:
     for r in results:
         status = r.get("status", "")
         if status == "posted":
-            lines.append(f"✅ [{r['category']}] {_image_label(r)} {r['url']}")
+            lines.append(f"✅ [{r['category']}] {image_label(r)} {r['url']}")
         elif status == "dry_run":
-            lines.append(f"📝 (dry run) [{r['category']}] {_image_label(r)}\n{r['text'][:300]}"
+            lines.append(f"📝 (dry run) [{r['category']}] {image_label(r)}\n{r['text'][:300]}"
                          + (f"\nimage: {r['image_url']}" if r.get("image_url") else ""))
         elif status == "no_india_news":
             lines.append("Only non-India stories were available this round.")
         elif status == "no_new_articles":
             lines.append("No new articles right now.")
-        elif status == "stopped":
-            lines.append("Stopped before posting.")
         elif status == "busy":
             lines.append("A run is already in progress.")
         else:
             lines.append(f"⚠️ {r.get('url', '')} {status}".strip())
     return "\n".join(lines) or "Nothing to do."
-
-
-def tick_now() -> list[dict]:
-    """Publish exactly one post (spare articles are tried if one fails)."""
-    return run_once(count=1, scheduled=True)
-
-
-def _daily_wait() -> float:
-    """Seconds to wait before the rolling-24h Threads posting limit frees a slot (0 = fine)."""
-    n, oldest = state.posts_in_window(24 * 3600)
-    if n < config.THREADS_DAILY_LIMIT or oldest is None:
-        return 0
-    return max(60.0, oldest + 24 * 3600 - time.time() + 60)
-
-
-def tick(notify=None) -> None:
-    """Heartbeat (every few seconds): while posting is ON, publish one post whenever the random
-    gap since the last one has elapsed. Runs until "stop posting"."""
-    notify = notify or (lambda _msg: None)
-    if not posting_enabled() or time.time() < float(state.get("next_post_at") or 0):
-        return
-
-    wait = _daily_wait()
-    if wait:
-        state.put("next_post_at", str(time.time() + wait))
-        if state.get("limit_notified") != "1":
-            state.put("limit_notified", "1")
-            resume = time.strftime("%H:%M", time.localtime(time.time() + wait))
-            notify(f"⏳ Reached the {config.THREADS_DAILY_LIMIT} posts / 24h limit. Pausing; "
-                   f"will resume automatically around {resume}. (Say 'stop posting' to end.)")
-        return
-    state.put("limit_notified", "0")
-
-    results = tick_now()
-    if results == [{"status": "busy"}]:
-        return  # another run holds the lock; try again at the next heartbeat
-
-    if any(r.get("status") == "posted" for r in results):
-        gap = random.uniform(config.POST_GAP_MIN_SECONDS, config.POST_GAP_MAX_SECONDS)
-        n = session_posts()
-        if n == 1 or n % config.NOTIFY_EVERY == 0:
-            posted = next(r for r in results if r.get("status") == "posted")
-            notify(f"✅ Post #{n} published [{posted['category']}] {_image_label(posted)}\n{posted['url']}")
-    else:
-        gap = config.IDLE_RETRY_SECONDS if results and results[0].get("status") in (
-            "no_new_articles", "no_india_news", "stopped") else 120
-        quiet = results and results[0].get("status") == "stopped"
-        if not quiet and time.time() - float(state.get("last_error_notice") or 0) > 900:
-            state.put("last_error_notice", str(time.time()))  # at most one warning per 15 minutes
-            notify(f"⚠️ Nothing posted: {format_results(results)}\nRetrying in {int(gap)}s.")
-    state.put("next_post_at", str(time.time() + gap))
 
 
 def _publish(item: dict, post: str, topic: str, photo_query: str, dry_run: bool) -> dict:
@@ -148,7 +85,7 @@ def _publish(item: dict, post: str, topic: str, photo_query: str, dry_run: bool)
 
 
 def _pick(categories: list[str], count: int) -> list[dict]:
-    """Round-robin over (shuffled) categories so posts stay varied."""
+    """Newest-first candidates. With several categories they are interleaved (shuffled order)."""
     queues = []
     for cat in categories:
         items = [i for i in feeds.fetch_category(cat)
@@ -168,28 +105,23 @@ def _pick(categories: list[str], count: int) -> list[dict]:
 
 
 def run_once(categories: list[str] | None = None, count: int | None = None,
-             dry_run: bool | None = None, scheduled: bool = False) -> list[dict]:
-    """Run the agent once. Returns one result dict per attempted post.
+             dry_run: bool | None = None) -> list[dict]:
+    """Post `count` (default 1) stories: the newest unposted ones in the given categories.
 
-    scheduled=True (start-posting sessions): successful posts are counted toward the session, and
-    a "stop posting" is honoured between posts - the post already in progress still finishes."""
+    Returns one result dict per attempt; the successful ones have status "posted"."""
     if not _run_lock.acquire(blocking=False):
         logger.info("A run is already in progress")
         return [{"status": "busy"}]
     try:
         categories = [c for c in (categories or config.CATEGORIES or list(FEEDS)) if c in FEEDS]
-        count = count or config.POSTS_PER_RUN
+        count = count or 1
         dry_run = config.DRY_RUN if dry_run is None else dry_run
         results = []
         done = 0
         skipped = 0
-        # Pull spare candidates so a failed article does not use up one of the requested posts
+        # Spare candidates: a story the AI rejects (e.g. not about India) must not use up the request
         for item in _pick(categories, count + 8):
             if done >= count:
-                break
-            if scheduled and not posting_enabled():
-                if not results:
-                    results.append({"status": "stopped"})
                 break
             written = llm.write_post(item, feeds.article_text(item))
             if not written:
@@ -213,8 +145,6 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
                                 "text": out["text"], "image": out["image"], "image_url": out["image_url"]})
                 continue
             state.record_post(item["url"], out["post_id"], item["category"])
-            if scheduled:
-                state.put("session_posts", str(session_posts() + 1))
             results.append({"url": item["url"], "category": item["category"], "status": "posted",
                             "post_id": out["post_id"], "text": out["text"], "image": out["image"]})
         if not results:

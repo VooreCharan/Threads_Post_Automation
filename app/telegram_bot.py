@@ -1,10 +1,8 @@
 """Telegram remote control (long polling, no webhook or public URL needed).
 
-Chat commands (only from TELEGRAM_OWNER_ID):
-  start posting - post continuously with a random gap until stopped
-  stop posting  - turn it off
-  post now      - publish one round immediately
-  status        - show on/off, interval and last posts
+Only the owner (TELEGRAM_OWNER_ID) is answered. Say "hi" for the command list, then e.g.
+"post sports": the bot publishes ONE latest update from that category to Threads and replies with the
+Threads link. Other commands: "status", "help".
 """
 import logging
 import re
@@ -13,16 +11,32 @@ import time
 
 import requests
 
-from . import bot, config, state
+from . import bot, config, state, threads
+from .sources import FEEDS
 
 logger = logging.getLogger(__name__)
 
 API = "https://api.telegram.org/bot{token}/{method}"
-HELP = ("Commands:\n"
-        "• start posting – post continuously (30-60 s apart) until you stop it\n"
-        "• stop posting – stop automatic posting\n"
-        "• post now – publish one round now\n"
-        "• status – current state")
+
+DESCRIPTIONS = {
+    "india": "India national news",
+    "business": "business and markets",
+    "technology": "technology and gadgets",
+    "sports": "sports and cricket",
+    "entertainment": "movies and entertainment",
+    "health": "health",
+    "science": "science and space",
+    "environment": "environment and climate",
+}
+# Alternative words accepted after "post"
+ALIASES = {
+    "tech": "technology", "gadgets": "technology", "sport": "sports", "cricket": "sports",
+    "news": "india", "national": "india", "politics": "india", "biz": "business", "finance": "business",
+    "market": "business", "markets": "business", "movies": "entertainment", "movie": "entertainment",
+    "bollywood": "entertainment", "env": "environment", "climate": "environment", "space": "science",
+}
+GREETINGS = {"hi", "hii", "hiii", "hello", "hey", "hello there", "hi there", "start", "help", "menu",
+             "commands", "list", "?"}
 
 
 def enabled() -> bool:
@@ -43,39 +57,74 @@ def send(chat_id: int | str, text: str) -> None:
         logger.error("Telegram send failed: %s", e)
 
 
-def notify(text: str) -> None:
-    """Message the owner (used for scheduled-run reports). Silent no-op if not configured."""
-    if enabled() and config.TELEGRAM_OWNER_ID:
-        send(config.TELEGRAM_OWNER_ID, text)
+def commands_text() -> str:
+    cats = [c for c in FEEDS]
+    lines = [f"• post {c} – latest {DESCRIPTIONS.get(c, c)} update" for c in cats]
+    return ("Commands:\n" + "\n".join(lines) +
+            "\n• status – today's posts and the latest ones\n• help – show this list again")
 
 
-def _command(text: str) -> str:
+def greeting_text() -> str:
+    return ("👋 Hi! I post ONE latest Indian news update to your Threads account whenever you ask.\n\n"
+            + commands_text() + "\n\nExample: send  post sports")
+
+
+def _normalise(text: str) -> str:
     t = text.strip().lower()
-    t = re.sub(r"@\w+$", "", t)          # /start_posting@MyBot
+    t = re.sub(r"@\w+$", "", t)          # /post_sports@MyBot
     t = t.lstrip("/").replace("_", " ")
-    t = re.sub(r"\s+", " ", t)
-    aliases = {"startposting": "start posting", "stopposting": "stop posting", "postnow": "post now"}
-    return aliases.get(t, t)
+    return re.sub(r"\s+", " ", t).strip()
+
+
+def _parse_category(word: str) -> str | None:
+    word = word.strip()
+    if word in FEEDS:
+        return word
+    return ALIASES.get(word) if ALIASES.get(word) in FEEDS else None
 
 
 def _status_text() -> str:
-    on = bot.posting_enabled()
-    lines = [f"Auto-posting: {'ON ✅' if on else 'OFF ⏸'}",
-             f"Posts this session: {bot.session_posts()}",
-             f"Gap between posts: {config.POST_GAP_MIN_SECONDS}-{config.POST_GAP_MAX_SECONDS}s (random)",
-             f"Posts in last 24h: {state.posts_in_window(86400)[0]} / {config.THREADS_DAILY_LIMIT}",
-             f"Categories: {', '.join(config.CATEGORIES) or 'all'}"]
+    n = state.posts_in_window(86400)[0]
+    lines = [f"Posts in the last 24h: {n} / {config.DAILY_POST_LIMIT}",
+             f"Minimum pause between posts: {config.MIN_SECONDS_BETWEEN_POSTS}s",
+             f"Categories: {', '.join(FEEDS)}"]
     last = state.recent_posts(3)
     if last:
-        lines.append("Last posts:")
+        lines.append("Latest posts:")
         lines += [f"• [{c}] {u}" for u, _, c, _ in last]
     return "\n".join(lines)
 
 
-def _run_in_background(chat_id, fn) -> None:
-    def work():
-        send(chat_id, bot.format_results(fn()))
-    threading.Thread(target=work, daemon=True).start()
+def _do_post(chat_id, category: str) -> None:
+    """Runs in a background thread: publish one story and report back."""
+    try:
+        results = bot.run_once([category], 1)
+        posted = next((r for r in results if r.get("status") == "posted"), None)
+        if posted:
+            link = threads.permalink(posted["post_id"])
+            send(chat_id, f"✅ Posted to Threads [{category}] {bot.image_label(posted)}\n"
+                          + (f"Threads post: {link}\n" if link else "")
+                          + f"Article: {posted['url']}")
+            return
+        first = results[0] if results else {}
+        status = first.get("status", "")
+        if status == "dry_run":
+            send(chat_id, bot.format_results(results))
+        elif status == "busy":
+            send(chat_id, "⏳ I'm still working on the previous post. Try again in a moment.")
+        elif status == "no_new_articles":
+            send(chat_id, f"No new {category} stories right now (the recent ones are already posted). "
+                          "Try another category.")
+        elif status == "no_india_news":
+            send(chat_id, f"The latest {category} stories weren't about India, so I skipped them. "
+                          "Try again later or pick another category.")
+        elif status.startswith("publish_failed"):
+            send(chat_id, f"⚠️ Couldn't publish to Threads.\n{status[:400]}")
+        else:
+            send(chat_id, "⚠️ The AI writers failed just now. Please try again in a minute.")
+    except Exception as e:  # never leave the user without an answer
+        logger.exception("post command failed")
+        send(chat_id, f"⚠️ Something went wrong: {str(e)[:300]}")
 
 
 def _handle(chat_id: int, user_id: int, text: str) -> None:
@@ -87,33 +136,29 @@ def _handle(chat_id: int, user_id: int, text: str) -> None:
         logger.warning("Ignored Telegram message from non-owner %s", user_id)
         return
 
-    cmd = _command(text)
-    if cmd == "start posting":
-        bot.set_posting(True)
-        send(chat_id, "Posting started ✅ — posting continuously with a random "
-                      f"{config.POST_GAP_MIN_SECONDS}-{config.POST_GAP_MAX_SECONDS}s gap between posts. "
-                      "Say 'stop posting' to stop.")
-    elif cmd == "stop posting":
-        was_on = bot.posting_enabled()
-        bot.set_posting(False)
-        if not was_on and not bot.is_busy():
-            send(chat_id, f"Posting is already stopped. Last session: {bot.session_posts()} post(s).")
-            return
-        if bot.is_busy():
-            send(chat_id, "Stop received ⏸ — finishing the post in progress, then stopping…")
-
-        def finish():
-            bot.wait_until_idle()  # the in-flight post completes first
-            n = bot.session_posts()
-            send(chat_id, f"⏹ Posting stopped. {n} post{'s' if n != 1 else ''} published this session.")
-        threading.Thread(target=finish, daemon=True).start()
-    elif cmd == "post now":
-        send(chat_id, "Posting one round…")
-        _run_in_background(chat_id, bot.run_once)
+    cmd = _normalise(text)
+    if cmd in GREETINGS:
+        send(chat_id, greeting_text())
     elif cmd == "status":
         send(chat_id, _status_text())
+    elif cmd == "post" or cmd.startswith("post "):
+        word = cmd[5:].strip()
+        category = _parse_category(word) if word else None
+        if category is None:
+            send(chat_id, ("Which category? " if not word else f"I don't know the category “{word}”. ")
+                 + "\n\n" + commands_text())
+            return
+        reason = bot.blocked_reason()
+        if reason:
+            send(chat_id, f"⏸ {reason}")
+            return
+        if bot.is_busy():
+            send(chat_id, "⏳ I'm still working on the previous post. Try again in a moment.")
+            return
+        send(chat_id, f"⏳ Finding the latest {category} update…")
+        threading.Thread(target=_do_post, args=(chat_id, category), daemon=True).start()
     else:
-        send(chat_id, HELP)
+        send(chat_id, "I didn't understand that.\n\n" + commands_text())
 
 
 def poll_forever() -> None:

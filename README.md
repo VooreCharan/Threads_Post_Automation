@@ -35,7 +35,7 @@ by India keywords, and the AI writer then confirms each story is mainly about In
    `threads_content_publish`, exchange it for a **long-lived token** (60 days), and note your
    Threads user ID. The app refreshes the token automatically.
 3. `cp .env.example .env` and fill in `GEMINI_API_KEY`, `THREADS_USER_ID`, `THREADS_ACCESS_TOKEN`,
-   and a random `TRIGGER_SECRET`.
+   `TELEGRAM_BOT_TOKEN` and `TELEGRAM_OWNER_ID` (see "Using it" below).
 
 ## Run
 
@@ -88,14 +88,27 @@ Other modes: `IMAGE_MODE=article` (article photos only), `stock` (stock only), `
 Reusing a publisher's photo is subject to their copyright and terms; the link back to the source is
 always included.
 
-## Triggers
+## Using it (Telegram)
 
-- **Telegram (main control)**: message your bot **start posting** and it posts continuously, one post at a time with a random 30-60 s gap (`POST_GAP_MIN_SECONDS` / `POST_GAP_MAX_SECONDS`), until you send **stop posting** (the post in progress finishes, then it replies with the session total). Also: **post now**, **status**. A Telegram message is sent for every post (`NOTIFY_EVERY=1`; raise it to get fewer). It pauses automatically near Threads' 250-posts-per-24h limit and resumes by itself. The on/off state survives restarts.
-  Setup: create a bot with [@BotFather](https://t.me/BotFather) → put the token in
-  `TELEGRAM_BOT_TOKEN`; start the app, send the bot any message, and it replies with your user id →
-  put that in `TELEGRAM_OWNER_ID` and restart. Only that id can control the bot.
-- **External**: `curl -X POST "https://YOUR_HOST/api/trigger?categories=health,environment&count=1" -H "X-Trigger-Key: $TRIGGER_SECRET"`
-  from cron-job.org, GitHub Actions, etc. Add `&dry_run=true` to preview.
+Only the owner (`TELEGRAM_OWNER_ID`) is answered. Say **hi** and the bot lists the commands:
+
+```
+post india | business | technology | sports | entertainment | health | science | environment
+status     today's post count and the latest posts
+help       show the list again
+```
+
+**`post sports`** publishes ONE latest update from that category to Threads, then replies with the
+Threads link and the article link. Short forms work too (`post tech`, `post sport`, `post news`).
+If you already know the commands you can send them directly.
+
+Safety limits stop a flood of commands: at least `MIN_SECONDS_BETWEEN_POSTS` (30 s) between posts and at
+most `DAILY_POST_LIMIT` (30) posts per rolling 24 hours. Stories that are not mainly about India are
+never posted, and a story is never posted twice.
+
+Setup: create a bot with [@BotFather](https://t.me/BotFather) and put its token in
+`TELEGRAM_BOT_TOKEN`; start the app, send the bot any message, and it replies with your user id; put
+that in `TELEGRAM_OWNER_ID` and restart.
 
 ## Deploy (free, no card): Render + Turso + UptimeRobot
 

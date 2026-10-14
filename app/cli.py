@@ -11,7 +11,7 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     p = argparse.ArgumentParser(description="News -> Threads agent")
     p.add_argument("--categories", default="", help=f"comma list from: {', '.join(FEEDS)}")
-    p.add_argument("--count", type=int, default=0, help="posts this run (default POSTS_PER_RUN)")
+    p.add_argument("--count", type=int, default=0, help="posts this run (default 1)")
     p.add_argument("--dry-run", action="store_true", help="generate posts but do not publish")
     p.add_argument("--check-llm", action="store_true", help="test every configured AI provider/model")
     p.add_argument("--migrate-db", metavar="SQLITE_FILE",

@@ -62,9 +62,6 @@ UNSPLASH_ACCESS_KEY = _env("UNSPLASH_ACCESS_KEY")
 THREADS_USER_ID = _env("THREADS_USER_ID")
 THREADS_ACCESS_TOKEN = _env("THREADS_ACCESS_TOKEN")  # long-lived token, used to seed the DB
 
-# Secret for POST /api/trigger. Empty disables the endpoint.
-TRIGGER_SECRET = _env("TRIGGER_SECRET")
-
 DB_PATH = _env("DB_PATH", "bot.db")
 # Optional: keep state in a Turso database instead of a local file (for hosts without a persistent
 # disk, e.g. Render free). TURSO_URL looks like libsql://mydb-myorg.turso.io
@@ -79,19 +76,9 @@ INDIA_ONLY = _env("INDIA_ONLY", "true").lower() in ("1", "true", "yes")
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_OWNER_ID = _env("TELEGRAM_OWNER_ID")
 
-# While posting is ON the bot posts continuously, one post at a time, waiting a random
-# number of seconds between MIN and MAX after each post (looks less mechanical than a fixed beat)
-POST_GAP_MIN_SECONDS = max(10, int(_env("POST_GAP_MIN_SECONDS", "30")))
-POST_GAP_MAX_SECONDS = max(POST_GAP_MIN_SECONDS, int(_env("POST_GAP_MAX_SECONDS", "60")))
-# Threads allows 250 API posts per rolling 24h; pause just below that and resume automatically
-THREADS_DAILY_LIMIT = int(_env("THREADS_DAILY_LIMIT", "240"))
-# Telegram message after every Nth post (1 = every post; errors are always sent)
-NOTIFY_EVERY = max(1, int(_env("NOTIFY_EVERY", "1")))
-# When there is nothing new to post (or every AI provider is down), retry after this many seconds
-IDLE_RETRY_SECONDS = int(_env("IDLE_RETRY_SECONDS", "600"))
-# Start with posting already ON after a restart (otherwise it stays off until you say "start posting")
-AUTO_START = _env("AUTO_START").lower() in ("1", "true", "yes")
-POSTS_PER_RUN = int(_env("POSTS_PER_RUN", "1"))
+# Safety limits for the "post <category>" command (protect the account from a flood of commands)
+DAILY_POST_LIMIT = int(_env("DAILY_POST_LIMIT", "30"))                    # posts per rolling 24 hours
+MIN_SECONDS_BETWEEN_POSTS = int(_env("MIN_SECONDS_BETWEEN_POSTS", "30"))  # pause between two posts
 # Comma-separated category names; empty = all categories in sources.py
 CATEGORIES = [c.strip() for c in _env("CATEGORIES").split(",") if c.strip()]
 # Ignore feed items older than this many hours

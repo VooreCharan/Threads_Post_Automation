@@ -87,4 +87,12 @@ def publish(text: str, link: str | None = None, image_url: str | None = None) ->
     return published["id"]
 
 
-publish_text = publish  # old name
+def permalink(post_id: str) -> str | None:
+    """Public URL of a published post, or None if it cannot be looked up."""
+    try:
+        info = _check(requests.get(f"{API}/v1.0/{post_id}",
+                                   params={"fields": "permalink", "access_token": _token()}, timeout=20))
+        return info.get("permalink")
+    except Exception as e:
+        logger.warning("Could not fetch the post link: %s", str(e)[:150])
+        return None
