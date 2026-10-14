@@ -44,6 +44,8 @@ def format_results(results: list[dict]) -> str:
         elif status == "dry_run":
             lines.append(f"📝 (dry run) [{r['category']}] {image_label(r)}\n{r['text'][:300]}"
                          + (f"\nimage: {r['image_url']}" if r.get("image_url") else ""))
+        elif status == "all_duplicates":
+            lines.append("The latest stories repeat topics already posted.")
         elif status == "no_india_news":
             lines.append("Only non-India stories were available this round.")
         elif status == "no_new_articles":
@@ -119,15 +121,27 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
         results = []
         done = 0
         skipped = 0
+        duplicates = 0
         # Spare candidates: a story the AI rejects (e.g. not about India) must not use up the request
-        for item in _pick(categories, count + 8):
+        for item in _pick(categories, count + 12):
             if done >= count:
                 break
+            same = state.near_identical_title(item["title"])
+            if same:  # word-for-word the same headline as a recent post: no AI call needed
+                state.mark_skipped(item["url"], f"duplicate of: {same[:80]}")
+                logger.info("Skipped (duplicate headline): %s", item["title"][:80])
+                duplicates += 1
+                continue
             written = llm.write_post(item, feeds.article_text(item))
             if not written:
                 results.append({"url": item["url"], "status": "generation_failed"})
                 continue
-            post, topic, photo_query, is_india = written
+            post, topic, photo_query, is_india, is_duplicate = written
+            if is_duplicate:  # the same news event another outlet / an earlier post already covered
+                state.mark_skipped(item["url"], "same event as a recent post")
+                logger.info("Skipped (same event already posted): %s", item["title"][:80])
+                duplicates += 1
+                continue
             if config.INDIA_ONLY and not is_india:
                 state.mark_skipped(item["url"], "not about India")
                 logger.info("Skipped (not about India): %s", item["title"][:80])
@@ -144,11 +158,12 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
                 results.append({"url": item["url"], "category": item["category"], "status": "dry_run",
                                 "text": out["text"], "image": out["image"], "image_url": out["image_url"]})
                 continue
-            state.record_post(item["url"], out["post_id"], item["category"])
+            state.record_post(item["url"], out["post_id"], item["category"], item["title"])
             results.append({"url": item["url"], "category": item["category"], "status": "posted",
                             "post_id": out["post_id"], "text": out["text"], "image": out["image"]})
         if not results:
-            results.append({"status": "no_india_news" if skipped else "no_new_articles"})
+            results.append({"status": "all_duplicates" if duplicates > skipped
+                            else "no_india_news" if skipped else "no_new_articles"})
         return results
     finally:
         _run_lock.release()

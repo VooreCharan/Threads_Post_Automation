@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import requests
 from google import genai
 
-from . import config
+from . import config, state
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,11 @@ Be exact about WHO said or did WHAT: never give a quote, opinion or action to th
 subject of a story is often not the person speaking). If you are unsure who said something, state the
 facts without attributing them, and do not add details that the article does not contain.
 
-Return ONLY a JSON object: {{"india": true, "post": "...", "topic": "...", "photo_query": "..."}}
+Return ONLY a JSON object:
+{{"india": true, "duplicate": false, "post": "...", "topic": "...", "photo_query": "..."}}
+- duplicate: true if this story reports the SAME news event or announcement as any title in the
+  "Recently posted" list below, even when worded differently or published by another outlet. false for
+  a different event, even on a similar subject (a different match, company, person or announcement).
 - india: true ONLY if the story is mainly about India: events or places in India, the Indian government
   or politics, Indian people, companies, markets, sport or culture, or foreign news that directly
   affects India. false if it is mainly about another country or region (even if an Indian outlet
@@ -40,6 +44,9 @@ Return ONLY a JSON object: {{"india": true, "post": "...", "topic": "...", "phot
   that the photo shows the actual people or event. Use "" (empty) ONLY when a stock photo would be
   inappropriate or misleading: the story is mainly about named people, elections or politicians, crime,
   war or conflict, accidents, disasters, deaths or other tragedy, or is too abstract to picture.
+
+Recently posted on this account:
+{recent}
 
 Category: {category}
 Title: {title}
@@ -145,7 +152,7 @@ def _cooldown_seconds(error: Exception) -> float:
 
 # ---- result parsing --------------------------------------------------------------------------
 
-def _parse(raw: str) -> tuple[str, str, str, bool]:
+def _parse(raw: str) -> tuple[str, str, str, bool, bool]:
     """Pull {"post", "topic", "photo_query", "india"} out of a model reply (tolerates fences)."""
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
@@ -159,7 +166,10 @@ def _parse(raw: str) -> tuple[str, str, str, bool]:
     india = data.get("india", True)
     if isinstance(india, str):
         india = india.strip().lower() in ("true", "yes", "1")
-    return post, topic, query, bool(india)
+    duplicate = data.get("duplicate", False)
+    if isinstance(duplicate, str):
+        duplicate = duplicate.strip().lower() in ("true", "yes", "1")
+    return post, topic, query, bool(india), bool(duplicate)
 
 
 def _ask(prompt: str, parse, what: str, ref: str):
@@ -187,9 +197,11 @@ def _ask(prompt: str, parse, what: str, ref: str):
     return None
 
 
-def write_post(item: dict, content: str) -> tuple[str, str, str, bool] | None:
-    """Return (post, topic, photo_query, is_india) from the first working provider, or None."""
-    prompt = PROMPT.format(category=item["category"], title=item["title"], content=content[:2500])
+def write_post(item: dict, content: str) -> tuple[str, str, str, bool, bool] | None:
+    """Return (post, topic, photo_query, is_india, is_duplicate) from the first working provider."""
+    recent = "\n".join(f"- {t[:140]}" for t in state.recent_titles(30)) or "(nothing yet)"
+    prompt = PROMPT.format(category=item["category"], title=item["title"], content=content[:2500],
+                           recent=recent)
     return _ask(prompt, _parse, "Post", item["url"])
 
 
