@@ -4,7 +4,7 @@ import logging
 import random
 import threading
 
-from . import config, drafts, feeds, images, llm, safety, state, threads
+from . import article, config, drafts, feeds, images, llm, safety, state, threads
 from .sources import FEEDS
 
 logger = logging.getLogger(__name__)
@@ -108,7 +108,11 @@ def _build(categories: list[str], count: int) -> tuple[list[dict], str]:
     built: list[dict] = []
     failures = 0
     # spare candidates: a story rejected by a check must not use up the request
-    for item in _pick(categories, count + 12):
+    candidates = _pick(categories, count + 12)
+    # read the first few likely candidates in parallel (the background upkeep has often done it already)
+    article.prefetch([i for i in candidates
+                      if not (config.SKIP_SENSITIVE and safety.sensitive_match(i["title"], i["summary"]))][:6])
+    for item in candidates:
         if len(built) >= count:
             break
         same = state.near_identical_title(item["title"])

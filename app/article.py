@@ -14,6 +14,8 @@ import threading
 import time
 
 import requests
+
+from . import net
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
@@ -176,7 +178,7 @@ def fetch(url: str, summary: str = "") -> tuple[str, str]:
 def _fetch(url: str, summary: str) -> tuple[str, str]:
     summary = _clean(summary)
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp = net.get(url, headers=HEADERS, timeout=15)
         if resp.status_code != 200 or "html" not in resp.headers.get("content-type", "html").lower():
             raise RuntimeError(f"HTTP {resp.status_code}")
         soup = BeautifulSoup(resp.content, "html.parser")
@@ -197,3 +199,12 @@ def _fetch(url: str, summary: str) -> tuple[str, str]:
         if chunk and not any(chunk in p or p in chunk for p in parts):
             parts.append(chunk)
     return _trim("\n".join(parts)), "summary"
+
+
+def prefetch(items: list[dict], workers: int = 4) -> None:
+    """Read several articles in parallel; the results land in the cache so later fetch() calls are instant."""
+    from concurrent.futures import ThreadPoolExecutor
+    if not items:
+        return
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        list(pool.map(lambda i: fetch(i["url"], i.get("summary", "")), items))

@@ -4,6 +4,7 @@ Providers are tried in LLM_CHAIN order (Gemini, Groq, OpenRouter, Hugging Face, 
 A provider/model that is overloaded, rate-limited or misconfigured goes on cooldown, so later posts
 skip it instead of waiting on it again.
 """
+import hashlib
 import json
 import logging
 import re
@@ -15,7 +16,7 @@ from typing import NamedTuple
 import requests
 from google import genai
 
-from . import config, state
+from . import alerts, cache, config, net, state
 
 logger = logging.getLogger(__name__)
 
@@ -123,7 +124,7 @@ def _call_openai_compat(provider: str, model: str, prompt: str) -> str:
             "messages": [{"role": "user", "content": prompt}]}
     if provider == "groq" and model.startswith("openai/gpt-oss"):
         body["reasoning_effort"] = "low"  # short answer needed; skip long deliberation
-    resp = requests.post(f"{cfg['base']}/chat/completions",
+    resp = net.post(f"{cfg['base']}/chat/completions",
                          headers={"Authorization": f"Bearer {cfg['key']}"},
                          json=body, timeout=30)
     if resp.status_code >= 400:
@@ -216,8 +217,12 @@ def _parse(raw: str) -> Written:
     return Written(post, tags, query, bool(india), bool(duplicate), bool(sensitive))
 
 
+_fail_streak = 0  # consecutive requests that no provider could answer
+
+
 def _ask(prompt: str, parse, what: str, ref: str):
     """Run a prompt through the provider chain; return parse(reply) from the first that works."""
+    global _fail_streak
     slots = build_slots()
     if not slots:
         logger.error("No LLM provider configured: set GEMINI_API_KEY and/or GROQ_API_KEY etc.")
@@ -236,8 +241,14 @@ def _ask(prompt: str, parse, what: str, ref: str):
                            f", skipping it for {cool:.0f}s" if cool else "", str(e)[:200])
             continue
         logger.info("%s done with %s", what, slot)
+        _fail_streak = 0
         return result
     logger.error("All LLM providers failed or are cooling down (%s) for %s", what, ref)
+    _fail_streak += 1
+    if _fail_streak >= 3:
+        alerts.alert("llm_down", "No AI provider could answer the last 3 requests, so drafts can't be written "
+                                 "right now. Check the API keys and free-tier quotas (python -m app.cli --check-llm).",
+                     every_hours=3)
     return None
 
 
@@ -266,8 +277,23 @@ HASHTAGS: {hashtags}"""
 # Returned by write_post when the AI could not produce a post that its own fact-check accepts
 UNVERIFIED = object()
 
+# Results are cached so the same story is never written or checked twice (saves free-tier AI quota),
+# e.g. when a draft is skipped and the next command meets the same candidate again.
+_write_cache = cache.TTLCache(2 * 3600)
+_verify_cache = cache.TTLCache(6 * 3600)
+_judge_cache = cache.TTLCache(6 * 3600)
 
-def verify_post(content: str, post: str, tags: list[str] | None = None):
+
+def _digest(*parts: str) -> str:
+    return hashlib.sha1("\x1f".join(parts).encode("utf-8", "replace")).hexdigest()
+
+
+def clear_caches() -> None:
+    for c in (_write_cache, _verify_cache, _judge_cache):
+        c.clear()
+
+
+def _verify_post(content: str, post: str, tags: list[str] | None = None):
     """Fact-check `post` against the article and judge the hashtags.
 
     Returns (unsupported_claims, irrelevant_hashtags); both empty means all good. None if no AI
@@ -286,13 +312,36 @@ def verify_post(content: str, post: str, tags: list[str] | None = None):
                 "Fact-check", post[:40])
 
 
-def write_post(item: dict, content: str):
-    """Write the post and fact-check it against the article.
+def verify_post(content: str, post: str, tags: list[str] | None = None):
+    """Cached fact-check (see _verify_post)."""
+    key = _digest(content[:config.ARTICLE_CHARS], post, ",".join(tags or []))
+    hit = _verify_cache.get(key)
+    if hit is not cache.MISSING:
+        return hit
+    result = _verify_post(content, post, tags)
+    if result is not None:  # never cache "no provider answered"
+        _verify_cache.set(key, result)
+    return result
 
-    Returns a Written(post, tags, photo_query, is_india, is_duplicate, is_sensitive), where tags are the story-specific hashtags
-    that survived the relevance check; None if the AI providers failed; or
+
+def write_post(item: dict, content: str):
+    """Write the post and fact-check it against the article (cached per story and recent-post list).
+
+    Returns a Written(post, tags, photo_query, is_india, is_duplicate, is_sensitive) whose tags are the
+    story-specific hashtags that survived the relevance check; None if the AI providers failed; or
     UNVERIFIED if even a second, corrected attempt still contained claims the article does not support."""
     recent = "\n".join(f"- {t[:140]}" for t in state.recent_titles(30)) or "(nothing yet)"
+    key = _digest(item["url"], content[:config.ARTICLE_CHARS], recent, item["category"])
+    hit = _write_cache.get(key)
+    if hit is not cache.MISSING:
+        return hit._replace(tags=list(hit.tags)) if isinstance(hit, Written) else hit
+    result = _write_post(item, content, recent)
+    if result is not None:  # never cache "the AI providers failed"
+        _write_cache.set(key, result)
+    return result
+
+
+def _write_post(item: dict, content: str, recent: str):
     prompt = PROMPT.format(category=item["category"], title=item["title"], content=content[:config.ARTICLE_CHARS],
                            recent=recent)
     for attempt in (1, 2):
@@ -345,7 +394,12 @@ def judge_photo(item: dict, post: str, candidates: list[dict]) -> int | None:
             raise ValueError("no JSON object in reply")
         return int(json.loads(match.group())["choice"])
 
-    choice = _ask(prompt, parse, "Photo check", item["url"])
+    key = _digest(item["url"], item["title"], post, options)
+    choice = _judge_cache.get(key)
+    if choice is cache.MISSING:
+        choice = _ask(prompt, parse, "Photo check", item["url"])
+        if choice is not None:  # 0 means "none fits": a real answer, cached too
+            _judge_cache.set(key, choice)
     return choice - 1 if choice and 1 <= choice <= len(candidates) else None
 
 

@@ -13,7 +13,7 @@ import requests
 from bs4 import BeautifulSoup
 from PIL import Image
 
-from . import config, llm
+from . import config, llm, net
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ BAD_HINTS = ("logo", "placeholder", "default", "sprite", "favicon", "avatar", "b
 def _download(url: str, timeout: int = 20) -> bytes | None:
     """Fetch an image, enforcing type and size. Returns the bytes or None."""
     try:
-        with requests.get(url, headers=HEADERS, timeout=timeout, stream=True) as r:
+        with net.get(url, headers=HEADERS, timeout=timeout, stream=True) as r:
             if r.status_code != 200:
                 return None
             ctype = r.headers.get("content-type", "").split(";")[0].strip().lower()
@@ -39,7 +39,7 @@ def _download(url: str, timeout: int = 20) -> bytes | None:
                 if len(data) > MAX_BYTES:
                     return None
             return data
-    except requests.RequestException:
+    except Exception:  # an unreachable image or page just means "no image"
         return None
 
 
@@ -60,9 +60,9 @@ def _usable(url: str) -> bool:
 def _page_images(page_url: str) -> list[str]:
     """Candidate image URLs from the article page's social-preview meta tags."""
     try:
-        resp = requests.get(page_url, headers=HEADERS, timeout=15)
+        resp = net.get(page_url, headers=HEADERS, timeout=15)
         soup = BeautifulSoup(resp.content, "html.parser")
-    except requests.RequestException:
+    except Exception:  # an unreachable image or page just means "no image"
         return []
     found = []
     for attrs in ({"property": "og:image"}, {"property": "og:image:secure_url"},
@@ -95,7 +95,7 @@ def find_article_image(item: dict) -> str | None:
 # dropped because relevance cannot be judged without one.
 
 def _search_pexels(query: str) -> list[dict]:
-    r = requests.get("https://api.pexels.com/v1/search", timeout=20,
+    r = net.get("https://api.pexels.com/v1/search", timeout=20,
                      headers={"Authorization": config.PEXELS_API_KEY},
                      params={"query": query, "per_page": 12, "orientation": "landscape"})
     r.raise_for_status()
@@ -104,7 +104,7 @@ def _search_pexels(query: str) -> list[dict]:
 
 
 def _search_pixabay(query: str) -> list[dict]:
-    r = requests.get("https://pixabay.com/api/", timeout=20,
+    r = net.get("https://pixabay.com/api/", timeout=20,
                      params={"key": config.PIXABAY_API_KEY, "q": query, "image_type": "photo",
                              "orientation": "horizontal", "safesearch": "true", "per_page": 12})
     r.raise_for_status()
@@ -113,7 +113,7 @@ def _search_pixabay(query: str) -> list[dict]:
 
 
 def _search_unsplash(query: str) -> list[dict]:
-    r = requests.get("https://api.unsplash.com/search/photos", timeout=20,
+    r = net.get("https://api.unsplash.com/search/photos", timeout=20,
                      headers={"Authorization": f"Client-ID {config.UNSPLASH_ACCESS_KEY}"},
                      params={"query": query, "per_page": 12, "orientation": "landscape",
                              "content_filter": "high"})

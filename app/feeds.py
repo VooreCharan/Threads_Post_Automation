@@ -10,7 +10,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 
-from . import article, config
+from . import article, config, net
 from .sources import FEEDS, INDIA_HINTS
 
 logger = logging.getLogger(__name__)
@@ -46,9 +46,9 @@ def _entry_image(e) -> str:
 
 def _fetch_feed(category: str, source: str, url: str, mixed: bool = False) -> list[dict]:
     try:
-        resp = requests.get(url, headers=HEADERS, timeout=15)
+        resp = net.get(url, headers=HEADERS, timeout=15)
         resp.raise_for_status()
-    except requests.RequestException as e:
+    except Exception as e:  # any failure of one feed must not break the category
         logger.warning("Feed failed (%s / %s): %s", category, source, e)
         return []
     items = []

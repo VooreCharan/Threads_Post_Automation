@@ -10,14 +10,22 @@ stop it from Telegram.
 ```
 app/sources.py       Indian RSS feeds by category (edit to add/remove)
 app/feeds.py         fetch, de-duplicate, filter by age and India keywords
-app/llm.py           AI provider chain: writes the post, checks it is about India, judges photos
+app/article.py       read the full article text (JSON-LD, then main paragraphs; promos removed)
+app/llm.py           AI provider chain: writes the post, fact-checks it, judges photos (cached)
 app/images.py        article image, or a relevant stock photo (Pexels / Pixabay / Unsplash)
-app/threads.py       Threads API publish + automatic token refresh
-app/bot.py           the posting loop: picks stories, publishes with random gaps, daily limit
-app/telegram_bot.py  "start posting" / "stop posting" / "post now" / "status" from Telegram
-app/state.py         SQLite: posted/skipped stories, settings, refreshed token
-app/main.py          FastAPI app: /healthz, status, POST /api/trigger, scheduler heartbeat
-app/cli.py           command line: dry runs and --check-llm
+app/bot.py           builds drafts from the newest postable story; publishes approved drafts
+app/drafts.py        drafts waiting for your approval (survive restarts, expire)
+app/safety.py        sensitive-story filter, new-account warm-up, daily cap and pause
+app/telegram_bot.py  Telegram commands, preview with buttons, polling or webhook
+app/threads.py       Threads API publish + token renewal
+app/maintenance.py   background upkeep: pre-reads stories, renews the token, checks the database
+app/alerts.py        warnings to your Telegram (once per cooldown)
+app/state.py         posted/skipped stories and settings: SQLite or Turso
+app/net.py           shared HTTP connections (reused, safe retries, no cookies)
+app/cache.py         small expiring cache for AI results
+app/main.py          FastAPI app: /healthz, status, Telegram webhook
+app/cli.py           command line: dry runs, --check-llm, --migrate-db
+tests/               automated tests (no network, no AI): python -m pytest
 ```
 
 Categories: india, business, technology, sports, entertainment, health, science, environment.
@@ -141,6 +149,37 @@ Setup: create a bot with [@BotFather](https://t.me/BotFather) and put its token 
 `TELEGRAM_BOT_TOKEN`; start the app, send the bot any message, and it replies with your user id; put
 that in `TELEGRAM_OWNER_ID` and restart.
 
+## Speed, reliability and alerts
+
+- **Fast replies.** Network connections are reused, and every few minutes (`MAINTENANCE_MINUTES`) a
+  background job refreshes the feeds and pre-reads the top stories of every category, so a `post ...`
+  command typically answers in a few seconds. It makes no AI calls, so it uses none of your free AI quota.
+  `PREWARM=false` turns it off.
+- **Fewer AI calls.** Writing, fact-check and photo-check results are cached, so the same story is never
+  processed twice. The fact-check is deliberately **never skipped**, even for short posts: short posts are
+  where an AI is most tempted to fill gaps from memory (a wrong job title for a person with a common name).
+- **Alerts on Telegram** (each at most once per cooldown): all AI providers failing (3 requests in a row),
+  the database unreachable or not saving, and the Threads token about to expire or failing to renew. The
+  token is renewed automatically when under 10 days are left, even if you have not posted. A
+  "Bot started" message tells you about every restart (`ALERT_ON_START=false` to silence it).
+- **Telegram webhook mode (optional).** Default `TELEGRAM_MODE=polling` keeps asking Telegram for messages,
+  so the host must stay awake (hence the UptimeRobot ping on Render's free plan). With
+  `TELEGRAM_MODE=webhook` Telegram calls the app instead: a sleeping Render service wakes when you send a
+  message, so no keep-alive monitor is needed. Trade-offs: the first reply after a sleep takes about a
+  minute, and the background upkeep and alerts only run while the app is awake. Render supplies the public
+  URL automatically (`RENDER_EXTERNAL_URL`); elsewhere set `PUBLIC_URL`. Switch back to `polling` any time.
+
+## Development and tests
+
+```
+pip install -r requirements-dev.txt
+python -m pytest            # ~140 tests, a few seconds, no network, no AI, no keys needed
+```
+
+GitHub Actions runs the tests on Python 3.13 and 3.14 for every push, plus a scan that fails the build if
+something that looks like an API key is committed. Dependencies are pinned in `requirements.txt` and the
+Python version in `.python-version` (what Render runs), so deploys are repeatable.
+
 ## Deploy (free, no card): Render + Turso + UptimeRobot
 
 Render's free web service has no persistent disk and sleeps after 15 minutes without traffic, so:
@@ -160,8 +199,9 @@ token), and **UptimeRobot** pings `/healthz` every 5 minutes to keep Render awak
    your local `.env` as an environment variable, plus `TURSO_URL` and `TURSO_TOKEN`. Do not set `DB_PATH`.
 4. **UptimeRobot**: https://uptimerobot.com -> *Add monitor* -> HTTP(s) -> URL
    `https://<your-service>.onrender.com/healthz`, interval 5 minutes.
-5. Stop any copy running on your PC (two copies would fight over the Telegram bot), then in Telegram
-   send `status`, `post now`, `start posting`.
+5. *(Optional)* set `TELEGRAM_MODE=webhook` to let the service sleep (see above); then UptimeRobot is not needed.
+6. Stop any copy running on your PC (two copies would fight over the Telegram bot), then in Telegram
+   send `hi`, then `post sports` and tap **Post to Threads** on the draft.
 
 Without `TURSO_URL`/`TURSO_TOKEN` the bot uses the local `bot.db` file. Any always-on Linux VM with a
 disk also works: create a Python venv, `pip install -r requirements.txt`, and run
@@ -170,6 +210,6 @@ disk also works: create a Python venv, `pip install -r requirements.txt`, and ru
 ## Notes
 
 - Threads allows 250 API posts per 24 hours per profile; text posts are limited to 500 characters.
-- Only headlines and short summaries are used; posts are rewritten by the model and always credit
-  and link the source. Review each publisher's terms before running at high volume.
+- Posts are written from the article text by an AI, rewritten in its own words, fact-checked against the
+  article, and always credit and link the source. Review each publisher's terms of use.
 - Serving other people (multi-user) requires Meta app review for `threads_content_publish`.

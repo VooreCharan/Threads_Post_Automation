@@ -4,14 +4,16 @@ Only the owner (TELEGRAM_OWNER_ID) is answered. Say "hi" for the command list, t
 the bot prepares ONE draft from the latest sports story and shows it with buttons. Nothing reaches
 Threads until you tap "Post to Threads" (turn that off with REQUIRE_APPROVAL=false).
 """
+import hashlib
 import logging
 import re
 import threading
 import time
+from collections import deque
 
 import requests
 
-from . import bot, config, drafts, safety, state, threads
+from . import bot, config, drafts, safety, state, threads, net
 from .sources import FEEDS
 
 logger = logging.getLogger(__name__)
@@ -55,7 +57,7 @@ def enabled() -> bool:
 
 
 def _call(method: str, http_timeout: int = 40, **params) -> dict:
-    resp = requests.post(API.format(token=config.TELEGRAM_BOT_TOKEN, method=method),
+    resp = net.post(API.format(token=config.TELEGRAM_BOT_TOKEN, method=method),
                          json=params, timeout=http_timeout)
     resp.raise_for_status()
     return resp.json()
@@ -316,29 +318,89 @@ def _handle_callback(cb: dict) -> None:
         _answer(callback_id)
 
 
+ALLOWED_UPDATES = ["message", "callback_query"]
+_seen_updates: deque = deque(maxlen=500)
+_seen_lock = threading.Lock()
+
+
+def handle_update(update: dict) -> None:
+    """Process one Telegram update (a message or a button tap). Used by polling and by the webhook;
+    an update that arrives twice (Telegram retries a webhook that was slow to answer) is handled once."""
+    update_id = update.get("update_id")
+    with _seen_lock:
+        if update_id is not None:
+            if update_id in _seen_updates:
+                return
+            _seen_updates.append(update_id)
+    try:
+        if update.get("callback_query"):
+            _handle_callback(update["callback_query"])
+            return
+        msg = update.get("message") or {}
+        if msg.get("text") and msg.get("from"):
+            _handle(msg["chat"]["id"], msg["from"]["id"], msg["text"])
+    except Exception:
+        logger.exception("Could not handle a Telegram update")
+
+
 def poll_forever() -> None:
     offset = None
+    try:  # a webhook left over from webhook mode would make getUpdates fail
+        _call("deleteWebhook", drop_pending_updates=False)
+    except Exception as e:
+        logger.warning("Could not clear a Telegram webhook: %s", str(e)[:100])
     logger.info("Telegram bot polling started")
     while True:
         try:
-            params = {"timeout": 30, "allowed_updates": ["message", "callback_query"]}
+            params = {"timeout": 30, "allowed_updates": ALLOWED_UPDATES}
             if offset is not None:
                 params["offset"] = offset
             for update in _call("getUpdates", http_timeout=45, **params).get("result", []):
                 offset = update["update_id"] + 1
-                if update.get("callback_query"):
-                    _handle_callback(update["callback_query"])
-                    continue
-                msg = update.get("message") or {}
-                if msg.get("text") and msg.get("from"):
-                    _handle(msg["chat"]["id"], msg["from"]["id"], msg["text"])
+                handle_update(update)
         except Exception as e:
             logger.error("Telegram polling error: %s", e)
             time.sleep(5)
 
 
-def start_polling_thread() -> None:
-    if enabled():
-        threading.Thread(target=poll_forever, daemon=True, name="telegram-poller").start()
-    else:
+def webhook_secret() -> str:
+    """Secret Telegram sends back in a header so only Telegram can call the webhook."""
+    return config.TELEGRAM_WEBHOOK_SECRET or hashlib.sha256(
+        f"webhook:{config.TELEGRAM_BOT_TOKEN}".encode()).hexdigest()[:48]
+
+
+def webhook_url() -> str:
+    return f"{config.PUBLIC_URL}/telegram/webhook"
+
+
+def setup_webhook() -> None:
+    _call("setWebhook", url=webhook_url(), secret_token=webhook_secret(),
+          allowed_updates=ALLOWED_UPDATES, drop_pending_updates=False)
+
+
+def _setup_webhook_with_retry() -> None:
+    for attempt in range(1, 6):
+        try:
+            setup_webhook()
+            logger.info("Telegram webhook set: %s", webhook_url())
+            return
+        except Exception as e:
+            logger.error("Setting the Telegram webhook failed (attempt %d/5): %s", attempt, str(e)[:150])
+            time.sleep(5 * attempt)
+
+
+def start() -> str:
+    """Start receiving Telegram messages. Returns the mode in use: "polling", "webhook" or "off"."""
+    if not enabled():
         logger.info("TELEGRAM_BOT_TOKEN not set; Telegram control disabled")
+        return "off"
+    if config.TELEGRAM_MODE == "webhook":
+        if config.PUBLIC_URL:
+            threading.Thread(target=_setup_webhook_with_retry, daemon=True, name="telegram-webhook").start()
+            return "webhook"
+        logger.error("TELEGRAM_MODE=webhook needs PUBLIC_URL (or RENDER_EXTERNAL_URL); using polling instead")
+    threading.Thread(target=poll_forever, daemon=True, name="telegram-poller").start()
+    return "polling"
+
+
+start_polling_thread = start  # old name

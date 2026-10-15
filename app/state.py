@@ -17,7 +17,7 @@ from contextlib import contextmanager
 
 import requests
 
-from . import config
+from . import config, net
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def _decode(cell: dict):
 def _turso(sql: str, args: tuple = ()) -> list[list]:
     body = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": [_encode(a) for a in args]}},
                          {"type": "close"}]}
-    resp = requests.post(f"{config.TURSO_URL}/v2/pipeline", json=body, timeout=20,
+    resp = net.post(f"{config.TURSO_URL}/v2/pipeline", json=body, timeout=20,
                          headers={"Authorization": f"Bearer {config.TURSO_TOKEN}"})
     if resp.status_code != 200:
         raise RuntimeError(f"Turso HTTP {resp.status_code}: {resp.text[:200]}")
@@ -110,6 +110,17 @@ def _write(sql: str, args: tuple = ()) -> None:
             logger.warning("Database write failed (attempt %d/3): %s", attempt, str(e)[:200])
             time.sleep(attempt)
     logger.error("Database write gave up; in-memory state is kept for this run: %s", sql[:60])
+    try:
+        from . import alerts  # imported here: alerts itself reads the state
+        alerts.alert("db_write", "Could not save to the database (it may be unreachable). The bot keeps working "
+                                 "from memory, but history and settings are not being stored.", every_hours=2, persist=False)
+    except Exception:
+        pass
+
+
+def ping() -> None:
+    """Raise if the database cannot be reached (used by the health check)."""
+    _run("SELECT 1")
 
 
 # ---- setup ------------------------------------------------------------------------------------

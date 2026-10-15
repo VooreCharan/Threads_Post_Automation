@@ -1,0 +1,48 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: requirements*.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Check that every module compiles
+        run: python -m compileall -q app
+
+      - name: Run the tests (no network, no AI, no secrets needed)
+        run: python -m pytest
+
+  secret-scan:
+    # Fails the build if something that looks like a real API key or token is committed.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Look for committed secrets
+        run: |
+          if git grep -n -I -E 'THAA[A-Za-z0-9]{40,}|AIza[0-9A-Za-z_-]{30,}|gsk_[A-Za-z0-9]{30,}|nvapi-[A-Za-z0-9_-]{30,}|hf_[A-Za-z0-9]{30,}|ghp_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{30,}|[0-9]{8,10}:AA[0-9A-Za-z_-]{30,}' -- . ':!*.md'; then
+            echo "::error::Possible secret committed. Remove it and rotate the key."
+            exit 1
+          fi
+          if git ls-files | grep -E '(^|/)\.env$|\.db$'; then
+            echo "::error::.env or a database file is tracked by git."
+            exit 1
+          fi
+          echo "No secrets found."

@@ -74,6 +74,22 @@ TURSO_TOKEN = _env("TURSO_TOKEN")
 # companies, markets, sport or culture). Stories mainly about other countries are skipped.
 INDIA_ONLY = _env("INDIA_ONLY", "true").lower() in ("1", "true", "yes")
 
+# Background upkeep: every few minutes refresh the news feeds and read the top stories in advance (so a
+# "post ..." command answers in seconds), renew the Threads token before it expires and check the database.
+# No AI calls are made, so it does not use any free-tier AI quota.
+PREWARM = _env("PREWARM", "true").lower() in ("1", "true", "yes")
+MAINTENANCE_MINUTES = max(5, int(_env("MAINTENANCE_MINUTES", "12")))
+# Send "Bot started" to Telegram on every start (useful to notice restarts on free hosts)
+ALERT_ON_START = _env("ALERT_ON_START", "true").lower() in ("1", "true", "yes")
+
+# Telegram: "polling" (default; the app keeps asking Telegram for messages, so the host must stay awake) or
+# "webhook" (Telegram calls the app, so a sleeping free host wakes on your message and no keep-alive monitor
+# is needed; the first reply after a sleep takes about a minute). Webhook mode needs PUBLIC_URL, which
+# Render provides automatically as RENDER_EXTERNAL_URL.
+TELEGRAM_MODE = _env("TELEGRAM_MODE", "polling").lower()
+PUBLIC_URL = (_env("PUBLIC_URL") or _env("RENDER_EXTERNAL_URL")).rstrip("/")
+TELEGRAM_WEBHOOK_SECRET = _env("TELEGRAM_WEBHOOK_SECRET")  # optional; derived from the bot token if empty
+
 # Telegram remote control: bot token from @BotFather, and your own numeric Telegram user id
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_OWNER_ID = _env("TELEGRAM_OWNER_ID")
