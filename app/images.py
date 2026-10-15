@@ -176,7 +176,7 @@ def find_stock_image(item: dict, post: str, query: str) -> tuple[str, str] | Non
             continue
         picked = candidates[choice]
         if _usable(picked["url"]):
-            return picked["url"], f"Stock photo: {picked['credit']}"  # clearly not the story's people
+            return picked["url"], None  # stock photos are shown without any credit
     return None
 
 

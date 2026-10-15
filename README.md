@@ -3,7 +3,7 @@
 Pulls fresh **Indian** headlines from free RSS feeds (8 categories, 31 feeds from The Hindu, Times of
 India, NDTV, Indian Express, Hindustan Times, Mint, Economic Times, Scroll, Gadgets 360 and NDTV
 Sports). A chain of free AI providers (Groq, NVIDIA, Gemini, OpenRouter, ...) writes a short original
-post with a source credit, and the bot publishes it to your Threads account through the official
+post that names its source and links the article, and the bot publishes it to your Threads account through the official
 Threads API, with the article's own image or a relevant free stock photo when available. You start and
 stop it from Telegram.
 
@@ -12,7 +12,7 @@ app/sources.py       Indian RSS feeds by category (edit to add/remove)
 app/feeds.py         fetch, de-duplicate, filter by age and India keywords
 app/article.py       read the full article text (JSON-LD, then main paragraphs; promos removed)
 app/llm.py           AI provider chain: writes the post, fact-checks it, judges photos (cached)
-app/images.py        article image, or a relevant stock photo (Pexels / Pixabay / Unsplash)
+app/images.py        article image, or a relevant stock photo (Pexels / Pixabay)
 app/bot.py           builds drafts from the newest postable story; publishes approved drafts
 app/drafts.py        drafts waiting for your approval (survive restarts, expire)
 app/safety.py        sensitive-story filter, new-account warm-up, daily cap and pause
@@ -79,26 +79,28 @@ another provider the first choice, reorder `LLM_CHAIN`, e.g. `LLM_CHAIN=groq,gem
 Default `IMAGE_MODE=auto`, in this order:
 
 1. **The article's own image** (its `og:image`, or the RSS picture): a JPEG/PNG of at least
-   `IMAGE_MIN_WIDTH` (600 px), not a logo or placeholder. The post credits the publisher
-   ("📷 Image: The Hindu") and links to the article.
+   `IMAGE_MIN_WIDTH` (600 px), not a logo or placeholder. The post ends with "📷 Image: The Hindu" naming the
+   publisher, next to the link to the article.
 2. **A relevant licensed stock photo**, when the article has no usable image. The AI writer proposes a
    search phrase such as "solar panels" (stories about named people, politics, crime or specific events
-   get none); Pexels / Pixabay / Unsplash candidates are judged by their descriptions and used only if one
-   clearly matches. It is labelled "📷 Stock photo: <photographer> / <site>" so nobody mistakes it for the
-   people in the story.
-3. **No image**: a text post with Threads' own link preview. This also happens whenever Threads rejects an
-   image (the chain is article image -> stock photo -> text), so a post is never lost.
+   get none); Pexels / Pixabay candidates are judged by their descriptions and used only if one clearly
+   matches. A stock photo carries **no credit of any kind** (no photographer, no site name); the post ends
+   with "Source: <publisher>" instead.
+3. **No image**: a text post (with Threads' own link-preview card), ending with "Source: <publisher>". This
+   also happens whenever Threads rejects an image (the chain is article image -> stock photo -> text), so a
+   post is never lost.
 
 You see the exact image in the Telegram draft before anything is posted.
+
+**Stock providers:** Pexels (`PEXELS_API_KEY`, https://www.pexels.com/api/) and Pixabay (`PIXABAY_API_KEY`,
+https://pixabay.com/api/docs/) are free and do not require attribution. Unsplash's API terms *do* require
+crediting the photographer, so it is not a default; `STOCK_PROVIDERS=pexels,pixabay,unsplash` adds it back,
+but then you must show its credit. Providers without a key are skipped.
 
 **Copyright:** a publisher's photo belongs to the publisher. Posting it with credit and a link is common
 for news accounts, but it is still their copyright and a complaint can lead to the post, or the account,
 being actioned. For the lowest risk set `IMAGE_MODE=stock` (licensed stock photos only); `article` uses
 article photos only and `off` posts text only.
-
-Free stock-photo keys (no card): Pexels https://www.pexels.com/api/ (`PEXELS_API_KEY`), Pixabay
-https://pixabay.com/api/docs/ (`PIXABAY_API_KEY`), Unsplash https://unsplash.com/developers
-(`UNSPLASH_ACCESS_KEY`, 50 requests/hour). Providers without a key are skipped.
 
 ## Using it (Telegram)
 
@@ -109,6 +111,16 @@ post india | business | technology | sports | entertainment | health | science |
 status     today's posts, limits and waiting drafts
 cancel     discard all waiting drafts
 help       show the list again
+```
+
+### The post layout
+```
+The post text, in the writer's own words (at most ~280 characters)
+
+#Sports #ViratKohli            <- the first tag is always the category you asked for; Threads allows one topic tag
+https://www.thehindu.com/...   <- the article
+📷 Image: The Hindu            <- ONE attribution line: this when the picture is the article's own image,
+                                  otherwise "Source: The Hindu" (stock photo or no picture). Never both.
 ```
 
 ### Preview and approve
@@ -141,8 +153,8 @@ publish immediately instead.
   per rolling 24 hours; both are checked again when you tap Post.
 - **New-account warm-up**: when the bot first sees a new `THREADS_USER_ID` it allows only 3 posts a day for
   3 days and 5 a day until day 7, then the normal limit (`ACCOUNT_WARMUP`).
-- Everything is posted through the official Threads API, with a source credit and link every time.
-  Article photos are credited to the publisher; set `IMAGE_MODE=stock` to avoid publishers' photos.
+- Everything is posted through the official Threads API, always with the article link and the publisher
+  named once. Article photos are credited to the publisher; set `IMAGE_MODE=stock` to avoid publishers' photos.
   Consider saying in the account bio that it shares news summaries with sources.
 
 Setup: create a bot with [@BotFather](https://t.me/BotFather) and put its token in

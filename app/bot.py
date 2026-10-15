@@ -150,8 +150,7 @@ def _build(categories: list[str], count: int) -> tuple[list[dict], str]:
             "url": item["url"], "title": item["title"], "category": item["category"], "source": item["source"],
             "post": written.post, "tags": tags, "photo_query": written.photo_query,
             "image_url": image_url, "image": kind, "credit": credit,
-            "text": llm.compose(written.post, tags, item["source"],
-                                link=item["url"] if image_url else None, photo_credit=credit),
+            "text": llm.compose(written.post, tags, item["source"], link=item["url"], photo_credit=credit),
         })
     if built:
         return built, "ok"
@@ -180,9 +179,9 @@ def publish_draft(draft: dict) -> dict:
             if not found:
                 continue
             image_url, credit = found
-        text = llm.compose(draft["post"], draft["tags"], draft["source"],
-                           link=draft["url"] if image_url else None, photo_credit=credit)
+        text = llm.compose(draft["post"], draft["tags"], draft["source"], link=draft["url"], photo_credit=credit)
         try:
+            # a text post also gets Threads' own link-preview card; an image post cannot have one
             post_id = threads.publish(text, link=None if image_url else draft["url"], image_url=image_url)
             return {"post_id": post_id, "image": kind, "text": text}
         except Exception as e:

@@ -74,8 +74,8 @@ def test_article_image_comes_first_with_a_publisher_credit(monkeypatch):
 def test_stock_photo_is_used_when_the_article_has_no_image(monkeypatch):
     monkeypatch.setattr(images, "find_article_image", lambda item: None)
     monkeypatch.setattr(images, "stock_available", lambda: True)
-    monkeypatch.setattr(images, "find_stock_image", lambda i, p, q: ("https://pexels/p.jpg", "Stock photo: Jane / Pexels"))
-    assert images.pick_image(ITEM, "post", "solar panels") == ("https://pexels/p.jpg", "stock", "Stock photo: Jane / Pexels")
+    monkeypatch.setattr(images, "find_stock_image", lambda i, p, q: ("https://pexels/p.jpg", None))
+    assert images.pick_image(ITEM, "post", "solar panels") == ("https://pexels/p.jpg", "stock", None)   # no credit
 
 
 def test_text_only_when_nothing_fits(monkeypatch):
@@ -90,7 +90,7 @@ def test_image_modes(monkeypatch, mode, expected_kind):
     monkeypatch.setattr(config, "IMAGE_MODE", mode)
     monkeypatch.setattr(images, "find_article_image", lambda item: "https://a/p.jpg")
     monkeypatch.setattr(images, "stock_available", lambda: True)
-    monkeypatch.setattr(images, "find_stock_image", lambda i, p, q: ("https://s/p.jpg", "Stock photo: A / Pexels"))
+    monkeypatch.setattr(images, "find_stock_image", lambda i, p, q: ("https://s/p.jpg", None))
     assert images.pick_image(ITEM, "post", "q")[1] == expected_kind
 
 
@@ -104,7 +104,7 @@ def test_stock_photo_needs_a_search_phrase_and_a_clear_match(monkeypatch):
     assert images.find_stock_image(ITEM, "post", "") is None                          # no phrase, no search
     monkeypatch.setattr(images.llm, "judge_photo", lambda item, post, cands: 0)
     monkeypatch.setattr(images, "_usable", lambda url: True)
-    assert images.find_stock_image(ITEM, "post", "solar panels") == ("https://p/1.jpg", "Stock photo: A / Pexels")
+    assert images.find_stock_image(ITEM, "post", "solar panels") == ("https://p/1.jpg", None)   # never credited
 
 
 # ---- publish fallback chain --------------------------------------------------------------------------
@@ -125,10 +125,11 @@ def test_rejected_article_image_falls_back_to_a_stock_photo_then_text(monkeypatc
 
     monkeypatch.setattr(threads, "publish", publish)
     monkeypatch.setattr(images, "stock_available", lambda: True)
-    monkeypatch.setattr(images, "find_stock_image", lambda i, p, q: ("https://pexels/s.jpg", "Stock photo: J / Pexels"))
+    monkeypatch.setattr(images, "find_stock_image", lambda i, p, q: ("https://pexels/s.jpg", None))
     out = bot.publish_draft(DRAFT)
     assert tried == ["https://th-i.thgim.com/p.jpg", "https://pexels/s.jpg"] and out["image"] == "stock"
-    assert "Stock photo: J / Pexels" in out["text"] and DRAFT["url"] in out["text"]
+    assert "Source: The Hindu" in out["text"] and DRAFT["url"] in out["text"]       # source instead of a credit
+    assert "Pexels" not in out["text"] and "\U0001F4F7" not in out["text"] and "Image:" not in out["text"]
 
     tried.clear()
     monkeypatch.setattr(images, "find_stock_image", lambda i, p, q: None)

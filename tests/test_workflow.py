@@ -23,7 +23,8 @@ class World:
                        "category": "sports", "published": 9e9 - i, "image": ""} for i, (t, _) in enumerate(STORIES)]
         self.text = {it["url"]: STORIES[i][1] for i, it in enumerate(self.items)}
         self.published = []      # (text, link, image_url) of every Threads publish
-        self.calls = []          # every Telegram API call: (method, params)
+        self.calls = []          # Telegram API calls since the last step: (method, params)
+        self.all_calls = []      # every Telegram API call of the test
         self._mid = 100
 
     def add(self, title: str) -> dict:
@@ -41,14 +42,20 @@ def world(monkeypatch):
     monkeypatch.setattr(feeds, "article_text", lambda i: w.text[i["url"]])
     monkeypatch.setattr(article, "prefetch", lambda items, workers=4: None)
     monkeypatch.setattr(llm, "write_post", lambda i, c: llm.Written(f"Post about {i['title']}.", ["ViratKohli"], "", True, False, False))
-    monkeypatch.setattr(images, "pick_image", lambda item, post="", q="": (
-        ("https://img.example/stock.jpg", "stock", "Stock photo: Jane / Pexels") if "Sindhu" in item["title"] else (None, None, None)))
+    def pick_image(item, post="", q=""):
+        if "Sindhu" in item["title"]:                    # a stock photo: never credited
+            return "https://img.example/stock.jpg", "stock", None
+        if "Neeraj" in item["title"]:                    # the article's own image: credited to the publisher
+            return "https://thgim.example/neeraj.jpg", "article", "Image: The Hindu"
+        return None, None, None
+    monkeypatch.setattr(images, "pick_image", pick_image)
     monkeypatch.setattr(threads, "publish", lambda text, link=None, image_url=None:
                         (w.published.append((text, link, image_url)) or f"id{len(w.published)}"))
     monkeypatch.setattr(threads, "permalink", lambda pid: f"https://www.threads.com/@newaccount/post/{pid}")
 
     def fake_call(method, http_timeout=40, **params):
         w.calls.append((method, params))
+        w.all_calls.append((method, params))
         if method in ("sendMessage", "sendPhoto"):
             w._mid += 1
             return {"result": {"message_id": w._mid}}
@@ -93,6 +100,15 @@ def ask_for_draft(w, category="sports"):
     return draft_messages(w)[0]
 
 
+def wait_posted(w, n):
+    """Wait until n posts have been published AND recorded (the app confirms in Telegram only after that)."""
+    assert wait(lambda: len(w.published) >= n and sum("Posted to Threads" in t for t in texts_since_start(w)) >= n), texts(w)
+
+
+def texts_since_start(w):
+    return [p.get("text") or p.get("caption") or "" for m, p in w.all_calls if m in ("sendMessage", "sendPhoto")]
+
+
 def answers(w):
     return [p for m, p in w.calls if m == "answerCallbackQuery"]
 
@@ -106,7 +122,7 @@ def test_hi_lists_the_commands_and_explains_approval(world):
 
 def test_post_prepares_a_draft_and_publishes_nothing(world):
     text, _ = ask_for_draft(world)
-    assert "Kohli" in text and "#Sports" in text and "Source: The Hindu" in text
+    assert "Kohli" in text and "#Sports" in text and "Source: The Hindu" in text      # text-only: the source line
     assert world.published == []
     assert state.was_skipped(world.items[0]["url"]) and state.was_skipped(world.items[1]["url"])  # sensitive + thin
 
@@ -116,7 +132,9 @@ def test_a_second_command_proposes_a_different_story(world):
     world.calls.clear()
     text2, _ = ask_for_draft(world)
     assert "Sindhu" in text2 and any(m == "sendPhoto" for m, _ in world.calls)
-    assert "Stock photo: Jane / Pexels" in text2
+    assert "Source: The Hindu" in text2                                  # stock photo: the story's source...
+    assert "Pexels" not in text2 and "Jane" not in text2 and "Stock photo" not in text2   # ...and no photo credit
+    assert "Image:" not in text2 and "\U0001F4F7 Image" not in text2
 
 
 def test_the_number_of_waiting_drafts_is_limited(world):
@@ -143,7 +161,7 @@ def test_approving_publishes_once_and_replies_with_the_threads_link(world):
 def test_a_double_tap_cannot_publish_twice(world):
     _, draft_id = ask_for_draft(world)
     tap(world, "ok", draft_id)
-    assert wait(lambda: len(world.published) == 1)
+    wait_posted(world, 1)
     tap(world, "ok", draft_id)
     assert len(world.published) == 1 and "expired" in answers(world)[0]["text"]
 
@@ -151,7 +169,7 @@ def test_a_double_tap_cannot_publish_twice(world):
 def test_the_pause_between_posts_is_enforced_when_you_approve(world):
     _, first = ask_for_draft(world)
     tap(world, "ok", first)
-    assert wait(lambda: len(world.published) == 1)
+    wait_posted(world, 1)
     config.MIN_SECONDS_BETWEEN_POSTS = 300
     _, second = ask_for_draft(world)
     tap(world, "ok", second)
@@ -159,8 +177,10 @@ def test_the_pause_between_posts_is_enforced_when_you_approve(world):
     assert drafts.get(second) is not None                                  # kept: approve later
     config.MIN_SECONDS_BETWEEN_POSTS = 0
     tap(world, "ok", second)
-    assert wait(lambda: len(world.published) == 2)
-    assert world.published[1][2] == "https://img.example/stock.jpg" and "Stock photo: Jane / Pexels" in world.published[1][0]
+    wait_posted(world, 2)
+    published_text = world.published[1][0]
+    assert world.published[1][2] == "https://img.example/stock.jpg"
+    assert "Source: The Hindu" in published_text and "Pexels" not in published_text and "Image:" not in published_text
     assert world.items[3]["url"] in world.published[1][0]                  # image posts carry the link in the text
 
 
@@ -248,7 +268,7 @@ def test_category_aliases(world):
 def test_with_approval_off_a_command_posts_straight_away(world):
     config.REQUIRE_APPROVAL = False
     say(world, "post sports")
-    assert wait(lambda: len(world.published) == 1)
+    wait_posted(world, 1)
     assert not draft_messages(world)
 
 
@@ -267,7 +287,7 @@ def test_a_story_about_the_same_event_is_skipped(world, monkeypatch):
     world.add("Kohli ton powers India past Australia in Perth")
     _, first = ask_for_draft(world)
     tap(world, "ok", first)
-    assert wait(lambda: len(world.published) == 1)
+    wait_posted(world, 1)
     say(world, "post sports")
     assert wait(lambda: draft_messages(world))
     assert "Kohli ton powers" not in draft_messages(world)[0][0]

@@ -45,7 +45,8 @@ Return ONLY a JSON object:
   or politics, Indian people, companies, markets, sport or culture, or foreign news that directly
   affects India. false if it is mainly about another country or region (even if an Indian outlet
   reported it) or is global news with no Indian angle.
-- post: 1-3 short sentences, at most 330 characters, clear and neutral, no URL, no hashtags, no emoji spam
+- post: 1-3 short sentences, at most 280 characters (hashtags and a link are added after it), clear and
+  neutral, no URL, no hashtags, no emoji spam
 - hashtags: 2 or 3 hashtags for THIS story, written WITHOUT the # sign, each a single word
   (CamelCase for phrases, e.g. TeamIndia, SabaAzad, MonsoonRains). Each must name something the article
   and your post are actually about: a person, place, organisation, event or specific theme that appears
@@ -404,33 +405,52 @@ def judge_photo(item: dict, post: str, candidates: list[dict]) -> int | None:
 
 
 def generate_post(item: dict, content: str) -> str | None:
-    """Convenience: write the post and return the final text (no image, no link in the text)."""
+    """Convenience: write the post and return the final text."""
     written = write_post(item, content)
-    return compose(written[0], written[1], item["source"]) if written else None
+    return compose(written[0], written[1], item["source"], link=item["url"]) if written else None
+
+
+_ABBREVIATIONS = {"dr", "mr", "mrs", "ms", "prof", "sr", "jr", "st", "no", "rs", "vs", "inc", "ltd", "co", "etc",
+                  "gen", "col", "capt", "sri", "smt", "hon", "govt", "dept", "approx", "est", "mt", "ft"}
+
+
+def _last_sentence_end(text: str) -> int:
+    """Index of the last real sentence end (. ! ?) in `text`, or -1. A full stop after an abbreviation
+    ("Dr.", "Rs.", "vs.") or a single initial ("B.", "U.S.") is not a sentence end."""
+    for m in reversed(list(re.finditer(r"[.!?](?=\s)", text))):
+        word = re.search(r"([A-Za-z]+)$", text[: m.start()])
+        if m.group() == "." and word and (word.group(1).lower() in _ABBREVIATIONS or len(word.group(1)) == 1):
+            continue
+        return m.start()
+    return -1
 
 
 def compose(post: str, tags: list[str], source: str, link: str | None = None,
             photo_credit: str | None = None) -> str:
-    """Final post text within the 500-char Threads limit.
+    """Final post text, within the 500-character Threads limit. The layout is:
 
-    post + [photo credit] + source credit + hashtags + [article link].
-    Threads allows ONE topic tag per post: the first #tag in the text is the one it uses, so the
-    body must contain no '#' and the most important tag goes first. The link goes in the text only
-    for image posts: Threads cannot show a link preview on them."""
+        the post text
+        (blank line)
+        #Hashtags
+        the article link
+        ONE attribution line
+
+    The attribution line is "📷 Image: <publisher>" when the picture is the article's own image, and
+    otherwise (a stock photo, or no picture) "Source: <publisher>". It is never both, and a stock photo is
+    never credited. Threads allows ONE topic tag per post: the first #tag in the text is the one it uses,
+    so the body contains no '#' and the category tag comes first."""
     post = post.replace("#", "").strip()
     parts = []
-    if photo_credit:
-        parts.append(f"\U0001F4F7 {photo_credit}")  # e.g. "Image: The Hindu" or "Stock photo: Jane / Pexels"
-    parts.append(f"Source: {source}")
     if tags:
         parts.append(" ".join(f"#{t}" for t in tags))
     if link:
         parts.append(link)
+    parts.append(f"\U0001F4F7 {photo_credit}" if photo_credit else f"Source: {source}")
     tail = "\n\n" + "\n".join(parts)
     room = THREADS_LIMIT - len(tail)
     if len(post) > room:
         cut = post[:room]
-        end = max(cut.rfind(". "), cut.rfind("! "), cut.rfind("? "))
+        end = _last_sentence_end(cut)
         if end >= len(cut) * 0.4:
             post = cut[: end + 1]  # keep whole sentences
         else:

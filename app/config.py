@@ -55,7 +55,9 @@ OPENAI_COMPAT = {
 IMAGE_MODE = _env("IMAGE_MODE", "auto").lower()
 IMAGE_MIN_WIDTH = int(_env("IMAGE_MIN_WIDTH", "600"))  # skip icons, logos and tiny thumbnails
 # Free stock-photo APIs (get a free key from each); tried in this order, only those with a key
-STOCK_PROVIDERS = [p.strip().lower() for p in _env("STOCK_PROVIDERS", "pexels,pixabay,unsplash").split(",") if p.strip()]
+# Pexels and Pixabay do not require attribution. Unsplash's API terms DO (photographer + Unsplash), so it is
+# not a default: add "unsplash" here only if you also show that credit.
+STOCK_PROVIDERS = [p.strip().lower() for p in _env("STOCK_PROVIDERS", "pexels,pixabay").split(",") if p.strip()]
 PEXELS_API_KEY = _env("PEXELS_API_KEY")
 PIXABAY_API_KEY = _env("PIXABAY_API_KEY")
 UNSPLASH_ACCESS_KEY = _env("UNSPLASH_ACCESS_KEY")

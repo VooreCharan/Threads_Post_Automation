@@ -71,20 +71,28 @@ def test_parse_rejects_garbage():
 
 def test_compose_has_one_topic_tag_first_and_no_hash_in_body():
     text = llm.compose("Body #1 text with #hash.", ["Sports", "TeamIndia"], "NDTV Sports")
-    assert text == "Body 1 text with hash.\n\nSource: NDTV Sports\n#Sports #TeamIndia"
-    assert text.index("#Sports") == text.index("#")
+    assert text == "Body 1 text with hash.\n\n#Sports #TeamIndia\nSource: NDTV Sports"
+    assert text.index("#Sports") == text.index("#")                 # the category tag is the Threads topic
 
 
-def test_compose_credit_and_link_order():
-    text = llm.compose("Post.", ["Sports"], "The Hindu", link="https://x.in/a", photo_credit="Image: The Hindu")
-    assert text.splitlines()[2:] == ["\U0001F4F7 Image: The Hindu", "Source: The Hindu", "#Sports", "https://x.in/a"]
+def test_post_layout_is_text_then_hashtags_then_link_then_one_attribution_line():
+    link = "https://www.thehindu.com/sport/a1.ece"
+    # the article's own image: the credit line names the publisher, and there is no separate "Source:" line
+    with_image = llm.compose("Kohli hit a century.", ["Sports", "ViratKohli"], "The Hindu", link=link,
+                             photo_credit="Image: The Hindu")
+    assert with_image == f"Kohli hit a century.\n\n#Sports #ViratKohli\n{link}\n\U0001F4F7 Image: The Hindu"
+    assert "Source:" not in with_image
+    # a stock photo (or no picture): no credit of any kind for the photo, the story's source instead
+    without = llm.compose("Kohli hit a century.", ["Sports", "ViratKohli"], "The Hindu", link=link)
+    assert without == f"Kohli hit a century.\n\n#Sports #ViratKohli\n{link}\nSource: The Hindu"
+    assert "\U0001F4F7" not in without
 
 
 def test_compose_never_exceeds_500_and_keeps_the_link():
     link = "https://www.bbc.co.uk/news/articles/" + "a" * 60
     for body in ("x" * 900, ("A full sentence here. " * 60)):
         text = llm.compose(body, ["Sports", "A", "B"], "BBC News", link=link, photo_credit="Image: BBC News")
-        assert len(text) <= 500 and text.endswith(link)
+        assert len(text) <= 500 and link in text and text.endswith("Image: BBC News")
     cut = llm.compose("First sentence is here. Second sentence is long " + "z" * 600, ["Sports"], "X")
     assert cut.startswith("First sentence is here.") and "z" not in cut   # trimmed at a sentence boundary
 
@@ -156,3 +164,32 @@ def test_three_failures_in_a_row_alert_the_owner(ai, monkeypatch):
         assert llm.write_post(dict(ITEM, url=ITEM["url"] + str(_)), ARTICLE) is None
         llm._cooldown_until.clear()
     assert "llm_down" in sent
+
+
+# ---- trimming never leaves a dangling abbreviation ----------------------------------------------------
+
+def test_trimming_does_not_stop_after_an_abbreviation():
+    first = ("Soha Ali Khan revealed on a podcast that her mother Sharmila Tagore insisted on surgery for stage zero "
+             "lung cancer after doctors found cells that turned out to be malignant, and that the family agreed with "
+             "the advice of the specialists who treated her at the hospital in Mumbai last month.")
+    body = first + (" Dr. Rao of AIIMS said such early surgery can cure the disease in most patients and that regular "
+                    "screening matters for everyone above fifty years of age, adding many more details about it here.")
+    link = "https://indianexpress.com/article/lifestyle/health/sharmila-tagore-stage-zero-lung-cancer-surgery-10917710"
+    text = llm.compose(body, ["Health", "SohaAliKhan", "SharmilaTagore"], "Indian Express", link=link)
+    first_line = text.split("\n\n")[0]
+    assert len(body) > 500 - 170 and len(text) <= 500          # trimming really happened
+    assert first_line == first, first_line                      # cut at the real sentence end, not after "Dr."
+
+
+@pytest.mark.parametrize("text,expected_end", [
+    ("He paid Rs. 5 crore. Next sentence here", 19),
+    ("Dr. Rao spoke. Then B. Rao replied and more", 13),
+    ("Costs rose vs. last year and then fell", -1),
+    ("Is it so? Yes it is. And more", 19),
+])
+def test_last_sentence_end(text, expected_end):
+    assert llm._last_sentence_end(text) == expected_end
+
+
+def test_the_writer_is_asked_for_short_posts():
+    assert "at most 280 characters" in llm.PROMPT
