@@ -11,11 +11,20 @@ logger = logging.getLogger(__name__)
 _run_lock = threading.Lock()
 
 
-# The Threads topic tag always matches the category asked for (the AI used to choose its own,
-# which could show e.g. "politics" on an entertainment post)
-TOPIC_BY_CATEGORY = {"india": "India News", "business": "Business", "technology": "Technology",
-                     "sports": "Sports", "entertainment": "Entertainment", "health": "Health",
-                     "science": "Science", "environment": "Environment"}
+# The FIRST hashtag is the Threads topic tag, so it always matches the category asked for (the AI
+# used to choose it, which could show e.g. "politics" on an entertainment post). Single words only.
+TAG_BY_CATEGORY = {"india": "IndiaNews", "business": "Business", "technology": "Technology",
+                   "sports": "Sports", "entertainment": "Entertainment", "health": "Health",
+                   "science": "Science", "environment": "Environment"}
+
+
+def final_tags(category: str, story_tags: list[str]) -> list[str]:
+    """Category tag first, then up to two story-specific tags that passed the relevance check."""
+    tags = [TAG_BY_CATEGORY[category]] if category in TAG_BY_CATEGORY else []
+    for t in story_tags:
+        if t.lower() not in {x.lower() for x in tags}:
+            tags.append(t)
+    return tags[:3]
 
 
 def is_busy() -> bool:
@@ -66,7 +75,7 @@ def format_results(results: list[dict]) -> str:
     return "\n".join(lines) or "Nothing to do."
 
 
-def _publish(item: dict, post: str, topic: str, photo_query: str, dry_run: bool) -> dict:
+def _publish(item: dict, post: str, tags: list[str], photo_query: str, dry_run: bool) -> dict:
     """Publish with the best image available, falling back so a post is never lost:
     article image -> relevant stock photo -> text only. Returns {"post_id", "image", "text", ...}."""
     url, kind, credit = images.pick_image(item, post, photo_query)
@@ -82,7 +91,7 @@ def _publish(item: dict, post: str, topic: str, photo_query: str, dry_run: bool)
             if not found:
                 continue
             image_url, image_credit = found
-        text = llm.compose(post, topic, item["source"], link=item["url"] if image_url else None,
+        text = llm.compose(post, tags, item["source"], link=item["url"] if image_url else None,
                            photo_credit=image_credit)
         if dry_run:
             return {"post_id": None, "image": image_kind, "image_url": image_url, "text": text}
@@ -151,8 +160,8 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
             if not written:
                 results.append({"url": item["url"], "status": "generation_failed"})
                 continue
-            post, topic, photo_query, is_india, is_duplicate = written
-            topic = TOPIC_BY_CATEGORY.get(item["category"], topic)
+            post, story_tags, photo_query, is_india, is_duplicate = written
+            tags = final_tags(item["category"], story_tags)
             if is_duplicate:  # the same news event another outlet / an earlier post already covered
                 state.mark_skipped(item["url"], "same event as a recent post")
                 logger.info("Skipped (same event already posted): %s", item["title"][:80])
@@ -164,7 +173,7 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
                 skipped += 1
                 continue
             try:
-                out = _publish(item, post, topic, photo_query, dry_run=dry_run)
+                out = _publish(item, post, tags, photo_query, dry_run=dry_run)
             except Exception as e:
                 logger.error("Publish failed for %s: %s", item["url"], e)
                 results.append({"url": item["url"], "status": f"publish_failed: {e}"})

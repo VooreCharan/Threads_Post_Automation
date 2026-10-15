@@ -102,6 +102,15 @@ help       show the list again
 Threads link and the article link. Short forms work too (`post tech`, `post sport`, `post news`).
 If you already know the commands you can send them directly.
 
+Every post ends with up to three hashtags. Threads allows only **one topic tag per post** (the first
+`#tag` in the text, shown beside your name), so the first hashtag is always the category you asked for
+(`#Sports`, `#Entertainment`, ...) and the next one or two are story-specific names taken from the
+article (`#ViratKohli`, `#RBI`). The AI proposes them and the fact-check pass drops any that are not
+clearly about the story; generic filler like `#Trending` is never used.
+
+Each post is also fact-checked against its article before it is published; a post that still has
+unsupported claims after one rewrite is skipped.
+
 Safety limits stop a flood of commands: at least `MIN_SECONDS_BETWEEN_POSTS` (30 s) between posts and at
 most `DAILY_POST_LIMIT` (30) posts per rolling 24 hours. Stories that are not mainly about India are
 never posted, and a story is never posted twice.

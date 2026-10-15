@@ -31,7 +31,7 @@ relationships) unless the article text itself says so: many different people sha
 namesake is probably NOT the person in this story. If the article only gives a name, use just the name.
 
 Return ONLY a JSON object:
-{{"india": true, "duplicate": false, "post": "...", "topic": "...", "photo_query": "..."}}
+{{"india": true, "duplicate": false, "post": "...", "hashtags": ["...", "..."], "photo_query": "..."}}
 - duplicate: true if this story reports the SAME news event or announcement as any title in the
   "Recently posted" list below, even when worded differently or published by another outlet. false for
   a different event, even on a similar subject (a different match, company, person or announcement).
@@ -40,7 +40,13 @@ Return ONLY a JSON object:
   affects India. false if it is mainly about another country or region (even if an Indian outlet
   reported it) or is global news with no Indian angle.
 - post: 1-3 short sentences, at most 330 characters, clear and neutral, no URL, no hashtags, no emoji spam
-- topic: ONE word or short phrase for a Threads topic tag (letters/numbers/spaces only)
+- hashtags: 2 or 3 hashtags for THIS story, written WITHOUT the # sign, each a single word
+  (CamelCase for phrases, e.g. TeamIndia, SabaAzad, MonsoonRains). Each must name something the article
+  and your post are actually about: a person, place, organisation, event or specific theme that appears
+  in the text. Prefer PROPER NAMES: people, teams, places, organisations, tournaments, films, schemes
+  (e.g. ViratKohli, RanjiTrophy, NDMC, Odisha). Avoid generic or time words (DayThree, Match, Report,
+  Announcement), filler (Trending, Viral, News, Breaking, Latest, Update) and anything the article
+  does not mention. If the story has fewer than two good names, return fewer hashtags.
 - photo_query: 2-4 words for a stock-photo search that would give a fitting, GENERIC illustration of the
   story's main subject, place or theme (e.g. "basketball arena", "video game console", "pharmacy
   shelves", "solar panels", "hospital ward", "coral reef", "stock exchange floor"). It must never imply
@@ -155,8 +161,25 @@ def _cooldown_seconds(error: Exception) -> float:
 
 # ---- result parsing --------------------------------------------------------------------------
 
-def _parse(raw: str) -> tuple[str, str, str, bool, bool]:
-    """Pull {"post", "topic", "photo_query", "india"} out of a model reply (tolerates fences)."""
+GENERIC_TAGS = {"news", "trending", "viral", "breaking", "breakingnews", "latest", "update", "updates",
+                "today", "topnews", "newsupdate", "newsupdates", "fyp", "follow", "foryou", "headlines",
+                "worldnews", "dailynews", "mustread", "share", "daythree", "dayone", "daytwo", "dayfour",
+                "dayfive", "match", "report", "story", "announcement", "statement", "reaction", "controversy"}
+
+
+def clean_tags(raw_tags, limit: int = 3) -> list[str]:
+    """Threads tags are single words (letters, digits, underscore), 2-30 chars, not generic filler."""
+    tags: list[str] = []
+    for t in raw_tags or []:
+        t = re.sub(r"[^A-Za-z0-9_]", "", str(t))
+        if 2 <= len(t) <= 30 and not t.isdigit() and t.lower() not in GENERIC_TAGS \
+                and t.lower() not in {x.lower() for x in tags}:
+            tags.append(t)
+    return tags[:limit]
+
+
+def _parse(raw: str) -> tuple[str, list[str], str, bool, bool]:
+    """Pull {"post", "hashtags", "photo_query", "india", "duplicate"} out of a model reply."""
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
         raise ValueError("no JSON object in reply")
@@ -164,7 +187,7 @@ def _parse(raw: str) -> tuple[str, str, str, bool, bool]:
     post = str(data["post"]).strip().strip('"')
     if not post:
         raise ValueError("empty post")
-    topic = re.sub(r"[^A-Za-z0-9 ]", "", str(data.get("topic", ""))).strip()
+    tags = clean_tags(data.get("hashtags") if isinstance(data.get("hashtags"), list) else [], limit=4)
     query = re.sub(r"[^A-Za-z0-9 ]", "", str(data.get("photo_query", "") or "")).strip()[:60]
     india = data.get("india", True)
     if isinstance(india, str):
@@ -172,7 +195,7 @@ def _parse(raw: str) -> tuple[str, str, str, bool, bool]:
     duplicate = data.get("duplicate", False)
     if isinstance(duplicate, str):
         duplicate = duplicate.strip().lower() in ("true", "yes", "1")
-    return post, topic, query, bool(india), bool(duplicate)
+    return post, tags, query, bool(india), bool(duplicate)
 
 
 def _ask(prompt: str, parse, what: str, ref: str):
@@ -207,34 +230,49 @@ who people are (profession, nationality, titles, relationships), numbers, dates,
 did what. A description of a person must come from the ARTICLE itself, not from general knowledge, and a
 famous namesake must not be assumed. Minor rewording is fine; invented or changed facts are not.
 
-Return ONLY JSON: {{"unsupported": ["claim 1", "claim 2"]}}  (an empty list if everything is supported)
+Also judge the HASHTAGS: a hashtag is irrelevant if it is not clearly about the main subject of this
+article and post (a person, place, organisation, event or theme the text really covers). Generic or
+misleading hashtags are irrelevant.
+
+Return ONLY JSON: {{"unsupported": ["claim 1"], "irrelevant_hashtags": ["Tag"]}}
+(use empty lists when everything is supported / every hashtag is relevant)
 
 ARTICLE:
 {content}
 
 POST:
-{post}"""
+{post}
+
+HASHTAGS: {hashtags}"""
 
 # Returned by write_post when the AI could not produce a post that its own fact-check accepts
 UNVERIFIED = object()
 
 
-def verify_post(content: str, post: str) -> list[str] | None:
-    """Claims in `post` that the article does not support ([] = fully supported).
-    None if no AI provider could answer."""
-    def parse(raw: str) -> list[str]:
+def verify_post(content: str, post: str, tags: list[str] | None = None):
+    """Fact-check `post` against the article and judge the hashtags.
+
+    Returns (unsupported_claims, irrelevant_hashtags); both empty means all good. None if no AI
+    provider could answer."""
+    def parse(raw: str) -> tuple[list[str], list[str]]:
         match = re.search(r"\{.*\}", raw, re.DOTALL)
         if not match:
             raise ValueError("no JSON object in reply")
-        return [str(c).strip() for c in json.loads(match.group())["unsupported"] if str(c).strip()]
+        data = json.loads(match.group())
+        claims = [str(c).strip() for c in data["unsupported"] if str(c).strip()]
+        bad = [re.sub(r"[^A-Za-z0-9_]", "", str(t)).lower() for t in data.get("irrelevant_hashtags") or []]
+        return claims, [t for t in bad if t]
 
-    return _ask(VERIFY_PROMPT.format(content=content[:2500], post=post), parse, "Fact-check", post[:40])
+    shown = " ".join("#" + t for t in tags or []) or "(none)"
+    return _ask(VERIFY_PROMPT.format(content=content[:2500], post=post, hashtags=shown), parse,
+                "Fact-check", post[:40])
 
 
 def write_post(item: dict, content: str):
     """Write the post and fact-check it against the article.
 
-    Returns (post, topic, photo_query, is_india, is_duplicate); None if the AI providers failed; or
+    Returns (post, tags, photo_query, is_india, is_duplicate), where tags are the story-specific hashtags
+    that survived the relevance check; None if the AI providers failed; or
     UNVERIFIED if even a second, corrected attempt still contained claims the article does not support."""
     recent = "\n".join(f"- {t[:140]}" for t in state.recent_titles(30)) or "(nothing yet)"
     prompt = PROMPT.format(category=item["category"], title=item["title"], content=content[:2500],
@@ -245,11 +283,15 @@ def write_post(item: dict, content: str):
             return None
         if not written[3] or written[4]:
             return written  # not about India / a duplicate: it will not be posted, no need to check
-        unsupported = verify_post(content, written[0])
-        if unsupported is None:
+        checked = verify_post(content, written[0], written[1])
+        if checked is None:
             return None  # cannot fact-check right now: do not publish unchecked text
+        unsupported, irrelevant = checked
         if not unsupported:
-            return written
+            keep = [t for t in written[1] if t.lower() not in irrelevant]
+            if len(keep) < len(written[1]):
+                logger.info("Dropped irrelevant hashtags: %s", ", ".join(t for t in written[1] if t not in keep))
+            return (written[0], keep, written[2], written[3], written[4])
         logger.warning("Fact-check rejected a draft (%s): %s", item["url"][-40:], "; ".join(unsupported)[:300])
         if attempt == 2:
             return UNVERIFIED
@@ -295,16 +337,21 @@ def generate_post(item: dict, content: str) -> str | None:
     return compose(written[0], written[1], item["source"]) if written else None
 
 
-def compose(post: str, topic: str, source: str, link: str | None = None,
+def compose(post: str, tags: list[str], source: str, link: str | None = None,
             photo_credit: str | None = None) -> str:
     """Final post text within the 500-char Threads limit.
 
-    post + [photo credit] + source credit and one topic tag + [article link].
-    The link goes in the text only for image posts: Threads cannot show a link preview on them."""
+    post + [photo credit] + source credit + hashtags + [article link].
+    Threads allows ONE topic tag per post: the first #tag in the text is the one it uses, so the
+    body must contain no '#' and the most important tag goes first. The link goes in the text only
+    for image posts: Threads cannot show a link preview on them."""
+    post = post.replace("#", "").strip()
     parts = []
     if photo_credit:
         parts.append(f"\U0001F4F7 Photo: {photo_credit}")
-    parts.append(f"Source: {source}" + (f"  #{topic}" if topic else ""))
+    parts.append(f"Source: {source}")
+    if tags:
+        parts.append(" ".join(f"#{t}" for t in tags))
     if link:
         parts.append(link)
     tail = "\n\n" + "\n".join(parts)
