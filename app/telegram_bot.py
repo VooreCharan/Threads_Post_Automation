@@ -115,6 +115,9 @@ def _do_post(chat_id, category: str) -> None:
         elif status == "no_new_articles":
             send(chat_id, f"No new {category} stories right now (the recent ones are already posted). "
                           "Try another category.")
+        elif status == "unverified":
+            send(chat_id, f"I couldn't write a reliably accurate post for the latest {category} stories "
+                          "(my fact-check rejected them), so I posted nothing. Try again later or pick another category.")
         elif status == "all_duplicates":
             send(chat_id, f"The latest {category} stories are about topics I've already posted. "
                           "Try again a bit later, or pick another category.")

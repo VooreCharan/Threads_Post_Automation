@@ -26,6 +26,9 @@ facts stated in it. Put it in your own words (do not copy sentences).
 Be exact about WHO said or did WHAT: never give a quote, opinion or action to the wrong person (the
 subject of a story is often not the person speaking). If you are unsure who said something, state the
 facts without attributing them, and do not add details that the article does not contain.
+NEVER use outside knowledge. Do not say who a person is (profession, nationality, past roles, titles,
+relationships) unless the article text itself says so: many different people share a name, and a famous
+namesake is probably NOT the person in this story. If the article only gives a name, use just the name.
 
 Return ONLY a JSON object:
 {{"india": true, "duplicate": false, "post": "...", "topic": "...", "photo_query": "..."}}
@@ -197,12 +200,64 @@ def _ask(prompt: str, parse, what: str, ref: str):
     return None
 
 
-def write_post(item: dict, content: str) -> tuple[str, str, str, bool, bool] | None:
-    """Return (post, topic, photo_query, is_india, is_duplicate) from the first working provider."""
+VERIFY_PROMPT = """You are a strict fact-checker for a news account. Compare the POST with the ARTICLE.
+
+List every claim in the POST that the ARTICLE text does not clearly support. Pay special attention to:
+who people are (profession, nationality, titles, relationships), numbers, dates, places, and who said or
+did what. A description of a person must come from the ARTICLE itself, not from general knowledge, and a
+famous namesake must not be assumed. Minor rewording is fine; invented or changed facts are not.
+
+Return ONLY JSON: {{"unsupported": ["claim 1", "claim 2"]}}  (an empty list if everything is supported)
+
+ARTICLE:
+{content}
+
+POST:
+{post}"""
+
+# Returned by write_post when the AI could not produce a post that its own fact-check accepts
+UNVERIFIED = object()
+
+
+def verify_post(content: str, post: str) -> list[str] | None:
+    """Claims in `post` that the article does not support ([] = fully supported).
+    None if no AI provider could answer."""
+    def parse(raw: str) -> list[str]:
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if not match:
+            raise ValueError("no JSON object in reply")
+        return [str(c).strip() for c in json.loads(match.group())["unsupported"] if str(c).strip()]
+
+    return _ask(VERIFY_PROMPT.format(content=content[:2500], post=post), parse, "Fact-check", post[:40])
+
+
+def write_post(item: dict, content: str):
+    """Write the post and fact-check it against the article.
+
+    Returns (post, topic, photo_query, is_india, is_duplicate); None if the AI providers failed; or
+    UNVERIFIED if even a second, corrected attempt still contained claims the article does not support."""
     recent = "\n".join(f"- {t[:140]}" for t in state.recent_titles(30)) or "(nothing yet)"
     prompt = PROMPT.format(category=item["category"], title=item["title"], content=content[:2500],
                            recent=recent)
-    return _ask(prompt, _parse, "Post", item["url"])
+    for attempt in (1, 2):
+        written = _ask(prompt, _parse, "Post", item["url"])
+        if not written:
+            return None
+        if not written[3] or written[4]:
+            return written  # not about India / a duplicate: it will not be posted, no need to check
+        unsupported = verify_post(content, written[0])
+        if unsupported is None:
+            return None  # cannot fact-check right now: do not publish unchecked text
+        if not unsupported:
+            return written
+        logger.warning("Fact-check rejected a draft (%s): %s", item["url"][-40:], "; ".join(unsupported)[:300])
+        if attempt == 2:
+            return UNVERIFIED
+        prompt += ("\n\nYour previous draft contained claims the article does NOT support:\n- "
+                   + "\n- ".join(unsupported[:5])
+                   + "\nWrite the post again using only what the article states. Do not describe who "
+                     "anyone is unless the article says so.")
+    return UNVERIFIED
 
 
 JUDGE_PROMPT = """You choose a stock photo for a news post. Be STRICT: a wrong photo is worse than none.

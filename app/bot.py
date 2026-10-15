@@ -11,6 +11,13 @@ logger = logging.getLogger(__name__)
 _run_lock = threading.Lock()
 
 
+# The Threads topic tag always matches the category asked for (the AI used to choose its own,
+# which could show e.g. "politics" on an entertainment post)
+TOPIC_BY_CATEGORY = {"india": "India News", "business": "Business", "technology": "Technology",
+                     "sports": "Sports", "entertainment": "Entertainment", "health": "Health",
+                     "science": "Science", "environment": "Environment"}
+
+
 def is_busy() -> bool:
     return _run_lock.locked()
 
@@ -44,6 +51,8 @@ def format_results(results: list[dict]) -> str:
         elif status == "dry_run":
             lines.append(f"📝 (dry run) [{r['category']}] {image_label(r)}\n{r['text'][:300]}"
                          + (f"\nimage: {r['image_url']}" if r.get("image_url") else ""))
+        elif status == "unverified":
+            lines.append("I couldn't write a reliably accurate post for the latest stories.")
         elif status == "all_duplicates":
             lines.append("The latest stories repeat topics already posted.")
         elif status == "no_india_news":
@@ -122,6 +131,7 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
         done = 0
         skipped = 0
         duplicates = 0
+        unverified = 0
         # Spare candidates: a story the AI rejects (e.g. not about India) must not use up the request
         for item in _pick(categories, count + 12):
             if done >= count:
@@ -133,10 +143,16 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
                 duplicates += 1
                 continue
             written = llm.write_post(item, feeds.article_text(item))
+            if written is llm.UNVERIFIED:  # the AI's draft kept failing its own fact-check
+                state.mark_skipped(item["url"], "post could not be verified against the article")
+                logger.info("Skipped (could not write a verified post): %s", item["title"][:80])
+                unverified += 1
+                continue
             if not written:
                 results.append({"url": item["url"], "status": "generation_failed"})
                 continue
             post, topic, photo_query, is_india, is_duplicate = written
+            topic = TOPIC_BY_CATEGORY.get(item["category"], topic)
             if is_duplicate:  # the same news event another outlet / an earlier post already covered
                 state.mark_skipped(item["url"], "same event as a recent post")
                 logger.info("Skipped (same event already posted): %s", item["title"][:80])
@@ -163,7 +179,8 @@ def run_once(categories: list[str] | None = None, count: int | None = None,
                             "post_id": out["post_id"], "text": out["text"], "image": out["image"]})
         if not results:
             results.append({"status": "all_duplicates" if duplicates > skipped
-                            else "no_india_news" if skipped else "no_new_articles"})
+                            else "no_india_news" if skipped
+                            else "unverified" if unverified else "no_new_articles"})
         return results
     finally:
         _run_lock.release()
