@@ -10,7 +10,7 @@ import feedparser
 import requests
 from bs4 import BeautifulSoup
 
-from . import config
+from . import article, config
 from .sources import FEEDS, INDIA_HINTS
 
 logger = logging.getLogger(__name__)
@@ -91,15 +91,5 @@ def fetch_category(category: str) -> list[dict]:
 
 
 def article_text(item: dict) -> str:
-    """Best-effort body text: RSS summary, topped up from the article page when it is short."""
-    text = item["summary"]
-    if len(text) >= 300:
-        return text
-    try:
-        resp = requests.get(item["url"], headers=HEADERS, timeout=15)
-        soup = BeautifulSoup(resp.content, "html.parser")
-        paras = [p.get_text(" ", strip=True) for p in soup.select("article p, main p")]
-        body = " ".join(p for p in paras if len(p) > 40)
-        return (text + " " + body).strip()[:2500]
-    except requests.RequestException:
-        return text
+    """The article's readable text (see article.py); falls back to the feed summary."""
+    return article.fetch(item["url"], item["summary"])[0]

@@ -48,9 +48,11 @@ OPENAI_COMPAT = {
                "models": _list("GITHUB_MODELS", "openai/gpt-4.1-mini"), "interval": 4.0},
 }
 
-# Images: "auto" = the article's own image, else a relevant free stock photo, else text only;
+# Images: the default "stock" uses only licensed free stock photos (never a publisher's photo) when one
+# clearly fits, else a text post with Threads' own link preview. "auto" = the article's own image first,
+# else stock, else text only (a publisher's photo may breach their copyright);
 # "article" = article image only; "stock" = stock photos only; "off" = text only
-IMAGE_MODE = _env("IMAGE_MODE", "auto").lower()
+IMAGE_MODE = _env("IMAGE_MODE", "stock").lower()
 IMAGE_MIN_WIDTH = int(_env("IMAGE_MIN_WIDTH", "600"))  # skip icons, logos and tiny thumbnails
 # Free stock-photo APIs (get a free key from each); tried in this order, only those with a key
 STOCK_PROVIDERS = [p.strip().lower() for p in _env("STOCK_PROVIDERS", "pexels,pixabay,unsplash").split(",") if p.strip()]
@@ -76,9 +78,28 @@ INDIA_ONLY = _env("INDIA_ONLY", "true").lower() in ("1", "true", "yes")
 TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_OWNER_ID = _env("TELEGRAM_OWNER_ID")
 
-# Safety limits for the "post <category>" command (protect the account from a flood of commands)
-DAILY_POST_LIMIT = int(_env("DAILY_POST_LIMIT", "30"))                    # posts per rolling 24 hours
-MIN_SECONDS_BETWEEN_POSTS = int(_env("MIN_SECONDS_BETWEEN_POSTS", "30"))  # pause between two posts
+# Safety limits for the "post <category>" command (protect the account from looking like spam)
+DAILY_POST_LIMIT = int(_env("DAILY_POST_LIMIT", "10"))                    # posts per rolling 24 hours
+MIN_SECONDS_BETWEEN_POSTS = int(_env("MIN_SECONDS_BETWEEN_POSTS", "300"))  # pause between two posts
+# A new account starts slowly: 3 posts/day for its first 3 days, 5/day until day 7, then DAILY_POST_LIMIT.
+# "Day 0" is when the bot first sees a new THREADS_USER_ID.
+ACCOUNT_WARMUP = _env("ACCOUNT_WARMUP", "true").lower() in ("1", "true", "yes")
+
+# Preview and approve: "post <category>" only prepares a draft in Telegram; nothing is published until
+# you tap the "Post to Threads" button. Set to false to publish immediately.
+REQUIRE_APPROVAL = _env("REQUIRE_APPROVAL", "true").lower() in ("1", "true", "yes")
+DRAFT_TTL_MINUTES = int(_env("DRAFT_TTL_MINUTES", "60"))  # an unapproved draft expires after this long
+MAX_PENDING_DRAFTS = int(_env("MAX_PENDING_DRAFTS", "3"))
+
+# Skip stories about violence, sexual crime, suicide, deaths and tragedies: unsuitable for an
+# automated account (and for the people involved). Turn off only if you review every draft yourself.
+SKIP_SENSITIVE = _env("SKIP_SENSITIVE", "true").lower() in ("1", "true", "yes")
+
+# Article text: how much of the article the AI reads, and the least text a story needs. A story with
+# less readable text than MIN_ARTICLE_CHARS is skipped: a post cannot be written or fact-checked from
+# a one-line summary.
+ARTICLE_CHARS = int(_env("ARTICLE_CHARS", "4500"))
+MIN_ARTICLE_CHARS = int(_env("MIN_ARTICLE_CHARS", "250"))
 # Comma-separated category names; empty = all categories in sources.py
 CATEGORIES = [c.strip() for c in _env("CATEGORIES").split(",") if c.strip()]
 # Ignore feed items older than this many hours

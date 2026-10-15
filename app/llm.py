@@ -10,6 +10,7 @@ import re
 import threading
 import time
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import requests
 from google import genai
@@ -31,10 +32,14 @@ relationships) unless the article text itself says so: many different people sha
 namesake is probably NOT the person in this story. If the article only gives a name, use just the name.
 
 Return ONLY a JSON object:
-{{"india": true, "duplicate": false, "post": "...", "hashtags": ["...", "..."], "photo_query": "..."}}
+{{"india": true, "duplicate": false, "sensitive": false, "post": "...", "hashtags": ["...", "..."], "photo_query": "..."}}
 - duplicate: true if this story reports the SAME news event or announcement as any title in the
   "Recently posted" list below, even when worded differently or published by another outlet. false for
   a different event, even on a similar subject (a different match, company, person or announcement).
+- sensitive: true if the story is mainly about violence or crime against people, sexual offences,
+  suicide, deaths, accidents with casualties, disasters, terrorism, communal tension or similar tragedy,
+  or involves minors in a harmful situation. false otherwise (including ordinary politics, business,
+  sport and entertainment news).
 - india: true ONLY if the story is mainly about India: events or places in India, the Indian government
   or politics, Indian people, companies, markets, sport or culture, or foreign news that directly
   affects India. false if it is mainly about another country or region (even if an Indian outlet
@@ -60,6 +65,16 @@ Recently posted on this account:
 Category: {category}
 Title: {title}
 Article: {content}"""
+
+
+class Written(NamedTuple):
+    """What the AI writer returns for one story."""
+    post: str
+    tags: list
+    photo_query: str
+    is_india: bool
+    is_duplicate: bool
+    is_sensitive: bool
 
 
 @dataclass(frozen=True)
@@ -178,7 +193,7 @@ def clean_tags(raw_tags, limit: int = 3) -> list[str]:
     return tags[:limit]
 
 
-def _parse(raw: str) -> tuple[str, list[str], str, bool, bool]:
+def _parse(raw: str) -> Written:
     """Pull {"post", "hashtags", "photo_query", "india", "duplicate"} out of a model reply."""
     match = re.search(r"\{.*\}", raw, re.DOTALL)
     if not match:
@@ -195,7 +210,10 @@ def _parse(raw: str) -> tuple[str, list[str], str, bool, bool]:
     duplicate = data.get("duplicate", False)
     if isinstance(duplicate, str):
         duplicate = duplicate.strip().lower() in ("true", "yes", "1")
-    return post, tags, query, bool(india), bool(duplicate)
+    sensitive = data.get("sensitive", False)
+    if isinstance(sensitive, str):
+        sensitive = sensitive.strip().lower() in ("true", "yes", "1")
+    return Written(post, tags, query, bool(india), bool(duplicate), bool(sensitive))
 
 
 def _ask(prompt: str, parse, what: str, ref: str):
@@ -264,25 +282,25 @@ def verify_post(content: str, post: str, tags: list[str] | None = None):
         return claims, [t for t in bad if t]
 
     shown = " ".join("#" + t for t in tags or []) or "(none)"
-    return _ask(VERIFY_PROMPT.format(content=content[:2500], post=post, hashtags=shown), parse,
+    return _ask(VERIFY_PROMPT.format(content=content[:config.ARTICLE_CHARS], post=post, hashtags=shown), parse,
                 "Fact-check", post[:40])
 
 
 def write_post(item: dict, content: str):
     """Write the post and fact-check it against the article.
 
-    Returns (post, tags, photo_query, is_india, is_duplicate), where tags are the story-specific hashtags
+    Returns a Written(post, tags, photo_query, is_india, is_duplicate, is_sensitive), where tags are the story-specific hashtags
     that survived the relevance check; None if the AI providers failed; or
     UNVERIFIED if even a second, corrected attempt still contained claims the article does not support."""
     recent = "\n".join(f"- {t[:140]}" for t in state.recent_titles(30)) or "(nothing yet)"
-    prompt = PROMPT.format(category=item["category"], title=item["title"], content=content[:2500],
+    prompt = PROMPT.format(category=item["category"], title=item["title"], content=content[:config.ARTICLE_CHARS],
                            recent=recent)
     for attempt in (1, 2):
         written = _ask(prompt, _parse, "Post", item["url"])
         if not written:
             return None
-        if not written[3] or written[4]:
-            return written  # not about India / a duplicate: it will not be posted, no need to check
+        if not written.is_india or written.is_duplicate or written.is_sensitive:
+            return written  # it will not be posted: no need to fact-check
         checked = verify_post(content, written[0], written[1])
         if checked is None:
             return None  # cannot fact-check right now: do not publish unchecked text
@@ -291,7 +309,7 @@ def write_post(item: dict, content: str):
             keep = [t for t in written[1] if t.lower() not in irrelevant]
             if len(keep) < len(written[1]):
                 logger.info("Dropped irrelevant hashtags: %s", ", ".join(t for t in written[1] if t not in keep))
-            return (written[0], keep, written[2], written[3], written[4])
+            return written._replace(tags=keep)
         logger.warning("Fact-check rejected a draft (%s): %s", item["url"][-40:], "; ".join(unsupported)[:300])
         if attempt == 2:
             return UNVERIFIED
@@ -348,7 +366,7 @@ def compose(post: str, tags: list[str], source: str, link: str | None = None,
     post = post.replace("#", "").strip()
     parts = []
     if photo_credit:
-        parts.append(f"\U0001F4F7 Photo: {photo_credit}")
+        parts.append(f"\U0001F4F7 Stock photo: {photo_credit}")  # clearly generic: not the people in the story
     parts.append(f"Source: {source}")
     if tags:
         parts.append(" ".join(f"#{t}" for t in tags))

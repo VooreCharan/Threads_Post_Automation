@@ -68,25 +68,20 @@ another provider the first choice, reorder `LLM_CHAIN`, e.g. `LLM_CHAIN=groq,gem
 
 ## Images
 
-Every post tries to carry a picture, in this order (`IMAGE_MODE=auto`):
+Default `IMAGE_MODE=stock`: a post gets a picture only when a **licensed free stock photo** clearly fits
+the story, and is credited as "Stock photo: <photographer> / <site>" so nobody mistakes it for the people
+in the story. Otherwise it is a text post with Threads' own link preview. A publisher's photo is never
+re-uploaded by default, because that can breach the publisher's copyright and risks complaints against
+the account.
 
-1. **The article's own image** (its `og:image`, or the RSS picture): a JPEG/PNG of at least
-   `IMAGE_MIN_WIDTH` (600 px), not a logo or placeholder.
-2. **A relevant free stock photo**, only when the story has a concrete photographable subject (the AI
-   writer proposes a search phrase such as "solar panels"; stories about people, politics, crime or
-   specific events get none). Candidates from Pexels / Pixabay / Unsplash are then judged by their
-   descriptions and used only if one clearly matches; otherwise nothing is used. The post credits the
-   photographer.
-3. **No image**: a normal text post with a link preview. This also happens whenever Threads rejects an
-   image, so a post is never lost.
+How a stock photo is chosen: the AI writer proposes a search phrase such as "solar panels" (stories about
+named people, politics, crime or specific events get none); Pexels / Pixabay / Unsplash candidates are
+then judged by their descriptions and used only if one clearly matches. Free keys (no card): Pexels
+https://www.pexels.com/api/ (`PEXELS_API_KEY`), Pixabay https://pixabay.com/api/docs/
+(`PIXABAY_API_KEY`), Unsplash https://unsplash.com/developers (`UNSPLASH_ACCESS_KEY`, 50 requests/hour).
 
-Free stock-photo keys (all free, no card): Pexels https://www.pexels.com/api/ (`PEXELS_API_KEY`),
-Pixabay https://pixabay.com/api/docs/ (`PIXABAY_API_KEY`), Unsplash https://unsplash.com/developers
-(`UNSPLASH_ACCESS_KEY`, demo apps are limited to 50 requests/hour). Providers without a key are skipped.
-
-Other modes: `IMAGE_MODE=article` (article photos only), `stock` (stock only), `off` (text only).
-Reusing a publisher's photo is subject to their copyright and terms; the link back to the source is
-always included.
+Other modes: `auto` (the article's own photo first, then stock), `article`, `off` (text only). If Threads
+rejects an image the post falls back to a text post, so a post is never lost.
 
 ## Using it (Telegram)
 
@@ -94,26 +89,43 @@ Only the owner (`TELEGRAM_OWNER_ID`) is answered. Say **hi** and the bot lists t
 
 ```
 post india | business | technology | sports | entertainment | health | science | environment
-status     today's post count and the latest posts
+status     today's posts, limits and waiting drafts
+cancel     discard all waiting drafts
 help       show the list again
 ```
 
-**`post sports`** publishes ONE latest update from that category to Threads, then replies with the
-Threads link and the article link. Short forms work too (`post tech`, `post sport`, `post news`).
-If you already know the commands you can send them directly.
+### Preview and approve
+`post sports` does **not** post. It prepares ONE draft from the latest sports story and shows it in
+Telegram exactly as it would appear on Threads, with the photo if any, and three buttons:
 
-Every post ends with up to three hashtags. Threads allows only **one topic tag per post** (the first
-`#tag` in the text, shown beside your name), so the first hashtag is always the category you asked for
-(`#Sports`, `#Entertainment`, ...) and the next one or two are story-specific names taken from the
-article (`#ViratKohli`, `#RBI`). The AI proposes them and the fact-check pass drops any that are not
-clearly about the story; generic filler like `#Trending` is never used.
+- **✅ Post to Threads**: publishes it, then replies with the Threads link and the article link
+- **🔄 Another story**: discards this draft (never proposed again) and prepares a different one
+- **❌ Skip**: discards it (never proposed again)
 
-Each post is also fact-checked against its article before it is published; a post that still has
-unsupported claims after one rewrite is skipped.
+Drafts survive restarts and expire after `DRAFT_TTL_MINUTES` (60); up to `MAX_PENDING_DRAFTS` (3) can
+wait. Short forms work too (`post tech`, `post sport`, `post news`). Set `REQUIRE_APPROVAL=false` to
+publish immediately instead.
 
-Safety limits stop a flood of commands: at least `MIN_SECONDS_BETWEEN_POSTS` (30 s) between posts and at
-most `DAILY_POST_LIMIT` (30) posts per rolling 24 hours. Stories that are not mainly about India are
-never posted, and a story is never posted twice.
+### What every draft has been through
+- **Full article text**, read from the publisher's page (structured data first, then the page's main
+  paragraphs, with ads and "Also Read" lines removed). A story with too little readable text
+  (`MIN_ARTICLE_CHARS`) is skipped, because a post cannot be written or checked from a one-line summary.
+- **Fact-check**: a second AI pass compares the draft with the article; unsupported claims (who someone
+  is, numbers, dates, who said what) cause one rewrite, then the story is skipped.
+- **India only**, **no repeats** (the same article, a near-identical headline, or the same news event
+  from another outlet), and **no sensitive stories** (violence, sexual crime, suicide, deaths, tragedy;
+  `SKIP_SENSITIVE`).
+- **Hashtags**: Threads allows only one topic tag per post (the first `#tag` in the text), so the first
+  hashtag is always the category you asked for and one or two story-specific names follow; the fact-check
+  drops any that are not clearly about the story, and generic filler like `#Trending` is never used.
+
+### Limits that keep the account safe
+- At least `MIN_SECONDS_BETWEEN_POSTS` (300 s) between two posts, and at most `DAILY_POST_LIMIT` (10)
+  per rolling 24 hours; both are checked again when you tap Post.
+- **New-account warm-up**: when the bot first sees a new `THREADS_USER_ID` it allows only 3 posts a day for
+  3 days and 5 a day until day 7, then the normal limit (`ACCOUNT_WARMUP`).
+- Everything is posted through the official Threads API, with a source credit and link every time.
+  Consider saying in the account bio that it shares news summaries with sources.
 
 Setup: create a bot with [@BotFather](https://t.me/BotFather) and put its token in
 `TELEGRAM_BOT_TOKEN`; start the app, send the bot any message, and it replies with your user id; put
