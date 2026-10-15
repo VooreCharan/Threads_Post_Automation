@@ -108,7 +108,8 @@ def _status_text() -> str:
     n = state.posts_in_window(86400)[0]
     limit = safety.daily_limit_now()
     age = safety.account_age_days()
-    lines = [f"Posts in the last 24h: {n} / {limit}"
+    lines = (["🧪 DRY RUN mode: approving a draft publishes nothing"] if config.DRY_RUN else [])
+    lines += [f"Posts in the last 24h: {n} / {limit}"
              + (f" (new-account warm-up, day {int(age) + 1}; normal limit {config.DAILY_POST_LIMIT})"
                 if limit < config.DAILY_POST_LIMIT else ""),
              f"Minimum pause between posts: {config.MIN_SECONDS_BETWEEN_POSTS // 60} min",
@@ -134,7 +135,8 @@ def _keyboard(draft_id: str) -> dict:
 def _preview_text(draft: dict) -> str:
     label = bot.image_label(draft)
     return (f"📝 DRAFT [{draft['category']}] {label}\n"
-            f"Nothing is posted until you tap the button below.\n"
+            + ("🧪 DRY RUN mode: tapping Post will NOT publish anything.\n" if config.DRY_RUN else
+               "Nothing is posted until you tap the button below.\n") +
             f"──────────\n{draft['text']}\n──────────\n"
             f"Article: {draft['url']}\n"
             f"Expires in {config.DRAFT_TTL_MINUTES} min.")
@@ -195,6 +197,9 @@ def _report_result(chat_id, result: dict) -> None:
     status = result.get("status")
     if status == "posted":
         _report_posted(chat_id, result)
+    elif status == "dry_run":
+        send(chat_id, f"🧪 DRY RUN: nothing was published to Threads. This is what would have been posted:\n"
+                      f"──────────\n{result['text']}\n──────────")
     elif status == "expired":
         send(chat_id, "This draft has expired or was already handled. Send the post command again.")
     elif status == "blocked":

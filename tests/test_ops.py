@@ -263,3 +263,11 @@ def test_health_endpoints_accept_get_and_head():
     with TestClient(app) as client:
         for path in ("/healthz", "/"):
             assert client.get(path).status_code == 200 and client.head(path).status_code == 200
+
+
+def test_a_dry_run_never_touches_the_real_threads_token(monkeypatch):
+    monkeypatch.setattr(config, "DRY_RUN", True)
+    monkeypatch.setattr(state, "ping", lambda: None)
+    monkeypatch.setattr(threads, "ensure_fresh", lambda: pytest.fail("the token was renewed during a dry run"))
+    monkeypatch.setattr(maintenance, "prewarm", lambda: 0)
+    maintenance.run_cycle()

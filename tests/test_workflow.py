@@ -292,3 +292,24 @@ def test_an_unverifiable_post_is_skipped_not_published(world, monkeypatch):
                         else llm.Written("P.", [], "", True, False, False))
     text, _ = ask_for_draft(world)
     assert "Kohli" not in text and state.was_skipped(world.items[2]["url"])
+
+
+# ---- dry run (safe rehearsal) ----------------------------------------------------------------------
+
+def test_dry_run_shows_what_would_be_posted_but_publishes_and_records_nothing(world):
+    config.DRY_RUN = True
+    text, draft_id = ask_for_draft(world)
+    assert "DRY RUN" in text
+    tap(world, "ok", draft_id)
+    assert wait(lambda: any("DRY RUN: nothing was published" in t for t in texts(world)))
+    assert world.published == []
+    assert not state.was_posted(world.items[2]["url"]) and state.posts_in_window(86400)[0] == 0
+    # the same story can be rehearsed again, because nothing was recorded
+    text2, _ = ask_for_draft(world)
+    assert "Kohli" in text2
+
+
+def test_status_says_when_dry_run_is_on(world):
+    config.DRY_RUN = True
+    say(world, "status")
+    assert "DRY RUN" in texts(world)[0]

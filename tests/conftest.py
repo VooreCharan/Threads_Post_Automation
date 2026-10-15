@@ -1,6 +1,7 @@
 """Shared test setup: every test gets a fresh temporary database, fixed settings, and NO network and
 NO AI access (any attempt fails the test), so the suite is fast, free and safe to run anywhere."""
 import logging
+import threading
 
 import pytest
 
@@ -32,6 +33,7 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "SKIP_SENSITIVE", True)
     monkeypatch.setattr(config, "INDIA_ONLY", True)
     monkeypatch.setattr(config, "IMAGE_MODE", "auto")
+    monkeypatch.setattr(config, "DRY_RUN", False)
     monkeypatch.setattr(net, "get", _blocked)
     monkeypatch.setattr(net, "post", _blocked)
     monkeypatch.setattr(net, "delete", _blocked)
@@ -42,6 +44,11 @@ def isolated(tmp_path, monkeypatch):
     llm._fail_streak = 0
     article._cache.clear()
     yield
+    # let this test's own background threads (draft preparation, publishing) finish, so that none of
+    # them is still running, and talking to the next test's fakes, when the next test starts
+    for t in threading.enumerate():
+        if t is not threading.current_thread() and t.name.startswith("Thread-"):
+            t.join(timeout=10)
 
 
 @pytest.fixture

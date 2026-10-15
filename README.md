@@ -149,6 +149,27 @@ Setup: create a bot with [@BotFather](https://t.me/BotFather) and put its token 
 `TELEGRAM_BOT_TOKEN`; start the app, send the bot any message, and it replies with your user id; put
 that in `TELEGRAM_OWNER_ID` and restart.
 
+## Testing on your own PC (safely)
+
+Without Telegram and without posting anything:
+```powershell
+python -m pytest                                   # the automated tests
+python -m app.cli --check-llm                      # which AI providers work
+python -m app.cli --dry-run --categories sports    # a real draft from live news, printed, not published
+```
+
+The full Telegram flow, as a rehearsal (**`DRY_RUN`: tapping Post publishes nothing and the Threads token is
+never touched**). Two copies of the bot must never use the same Telegram bot at once, so give your PC its
+own test bot (create one with @BotFather; only its token differs) or suspend the Render service first:
+```powershell
+$env:DRY_RUN = "true"                         # rehearsal: nothing is published
+$env:DB_PATH = "test.db"                      # a separate history, your real one is untouched
+$env:TELEGRAM_BOT_TOKEN = "<test bot token>"  # NOT the token of the live bot
+uvicorn app.main:app --port 8001
+```
+These `$env:` settings apply only to that PowerShell window. Then in Telegram send `hi`, `status`,
+`post technology`, and tap the buttons. Open http://127.0.0.1:8001/ for the app's status.
+
 ## Speed, reliability and alerts
 
 - **Fast replies.** Network connections are reused, and every few minutes (`MAINTENANCE_MINUTES`) a

@@ -220,6 +220,9 @@ def approve(draft_id: str) -> dict:
             return {"status": "expired"}
         if state.was_posted(draft["url"]):
             return {"status": "already_posted", "url": draft["url"]}
+        if config.DRY_RUN:  # a rehearsal: nothing is published and nothing is recorded as posted
+            return {"status": "dry_run", "url": draft["url"], "category": draft["category"], "text": draft["text"],
+                    "image": draft.get("image")}
         try:
             out = publish_draft(draft)
         except Exception as e:

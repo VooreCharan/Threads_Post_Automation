@@ -50,7 +50,10 @@ def run_cycle() -> None:
     except Exception as e:
         alerts.alert("db_down", f"The database is unreachable ({str(e)[:120]}). The bot keeps working from "
                                 "memory, but history and settings are not being saved.", every_hours=2, persist=False)
-    days = threads.ensure_fresh()  # renews the token when under 10 days are left; alerts if it cannot
+    if config.DRY_RUN:  # a rehearsal must never touch (renew) the real Threads token
+        days = None
+    else:
+        days = threads.ensure_fresh()  # renews the token when under 10 days are left; alerts if it cannot
     if days is not None and days < 0:
         logger.error("Threads token has expired")
     if config.PREWARM:
