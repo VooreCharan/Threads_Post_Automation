@@ -48,11 +48,11 @@ OPENAI_COMPAT = {
                "models": _list("GITHUB_MODELS", "openai/gpt-4.1-mini"), "interval": 4.0},
 }
 
-# Images: the default "stock" uses only licensed free stock photos (never a publisher's photo) when one
-# clearly fits, else a text post with Threads' own link preview. "auto" = the article's own image first,
-# else stock, else text only (a publisher's photo may breach their copyright);
-# "article" = article image only; "stock" = stock photos only; "off" = text only
-IMAGE_MODE = _env("IMAGE_MODE", "stock").lower()
+# Images: the default "auto" = the article's own image first (credited to the publisher, with a link
+# back), else a relevant licensed stock photo, else a text post with Threads' own link preview.
+# "stock" = only licensed stock photos (never a publisher's photo: the safest for copyright);
+# "article" = article image only; "off" = text only. A publisher's photo is their copyright.
+IMAGE_MODE = _env("IMAGE_MODE", "auto").lower()
 IMAGE_MIN_WIDTH = int(_env("IMAGE_MIN_WIDTH", "600"))  # skip icons, logos and tiny thumbnails
 # Free stock-photo APIs (get a free key from each); tried in this order, only those with a key
 STOCK_PROVIDERS = [p.strip().lower() for p in _env("STOCK_PROVIDERS", "pexels,pixabay,unsplash").split(",") if p.strip()]

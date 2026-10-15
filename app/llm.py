@@ -366,7 +366,7 @@ def compose(post: str, tags: list[str], source: str, link: str | None = None,
     post = post.replace("#", "").strip()
     parts = []
     if photo_credit:
-        parts.append(f"\U0001F4F7 Stock photo: {photo_credit}")  # clearly generic: not the people in the story
+        parts.append(f"\U0001F4F7 {photo_credit}")  # e.g. "Image: The Hindu" or "Stock photo: Jane / Pexels"
     parts.append(f"Source: {source}")
     if tags:
         parts.append(" ".join(f"#{t}" for t in tags))

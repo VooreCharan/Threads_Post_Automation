@@ -176,7 +176,7 @@ def find_stock_image(item: dict, post: str, query: str) -> tuple[str, str] | Non
             continue
         picked = candidates[choice]
         if _usable(picked["url"]):
-            return picked["url"], picked["credit"]
+            return picked["url"], f"Stock photo: {picked['credit']}"  # clearly not the story's people
     return None
 
 
@@ -188,7 +188,7 @@ def pick_image(item: dict, post: str = "", photo_query: str = "") -> tuple[str |
     if mode in ("auto", "article"):
         url = find_article_image(item)
         if url:
-            return url, "article", None
+            return url, "article", f"Image: {item['source']}"  # credit the publisher
     if mode in ("auto", "stock") and stock_available():
         found = find_stock_image(item, post, photo_query)
         if found:

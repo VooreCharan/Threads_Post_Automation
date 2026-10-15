@@ -68,20 +68,29 @@ another provider the first choice, reorder `LLM_CHAIN`, e.g. `LLM_CHAIN=groq,gem
 
 ## Images
 
-Default `IMAGE_MODE=stock`: a post gets a picture only when a **licensed free stock photo** clearly fits
-the story, and is credited as "Stock photo: <photographer> / <site>" so nobody mistakes it for the people
-in the story. Otherwise it is a text post with Threads' own link preview. A publisher's photo is never
-re-uploaded by default, because that can breach the publisher's copyright and risks complaints against
-the account.
+Default `IMAGE_MODE=auto`, in this order:
 
-How a stock photo is chosen: the AI writer proposes a search phrase such as "solar panels" (stories about
-named people, politics, crime or specific events get none); Pexels / Pixabay / Unsplash candidates are
-then judged by their descriptions and used only if one clearly matches. Free keys (no card): Pexels
-https://www.pexels.com/api/ (`PEXELS_API_KEY`), Pixabay https://pixabay.com/api/docs/
-(`PIXABAY_API_KEY`), Unsplash https://unsplash.com/developers (`UNSPLASH_ACCESS_KEY`, 50 requests/hour).
+1. **The article's own image** (its `og:image`, or the RSS picture): a JPEG/PNG of at least
+   `IMAGE_MIN_WIDTH` (600 px), not a logo or placeholder. The post credits the publisher
+   ("📷 Image: The Hindu") and links to the article.
+2. **A relevant licensed stock photo**, when the article has no usable image. The AI writer proposes a
+   search phrase such as "solar panels" (stories about named people, politics, crime or specific events
+   get none); Pexels / Pixabay / Unsplash candidates are judged by their descriptions and used only if one
+   clearly matches. It is labelled "📷 Stock photo: <photographer> / <site>" so nobody mistakes it for the
+   people in the story.
+3. **No image**: a text post with Threads' own link preview. This also happens whenever Threads rejects an
+   image (the chain is article image -> stock photo -> text), so a post is never lost.
 
-Other modes: `auto` (the article's own photo first, then stock), `article`, `off` (text only). If Threads
-rejects an image the post falls back to a text post, so a post is never lost.
+You see the exact image in the Telegram draft before anything is posted.
+
+**Copyright:** a publisher's photo belongs to the publisher. Posting it with credit and a link is common
+for news accounts, but it is still their copyright and a complaint can lead to the post, or the account,
+being actioned. For the lowest risk set `IMAGE_MODE=stock` (licensed stock photos only); `article` uses
+article photos only and `off` posts text only.
+
+Free stock-photo keys (no card): Pexels https://www.pexels.com/api/ (`PEXELS_API_KEY`), Pixabay
+https://pixabay.com/api/docs/ (`PIXABAY_API_KEY`), Unsplash https://unsplash.com/developers
+(`UNSPLASH_ACCESS_KEY`, 50 requests/hour). Providers without a key are skipped.
 
 ## Using it (Telegram)
 
@@ -125,6 +134,7 @@ publish immediately instead.
 - **New-account warm-up**: when the bot first sees a new `THREADS_USER_ID` it allows only 3 posts a day for
   3 days and 5 a day until day 7, then the normal limit (`ACCOUNT_WARMUP`).
 - Everything is posted through the official Threads API, with a source credit and link every time.
+  Article photos are credited to the publisher; set `IMAGE_MODE=stock` to avoid publishers' photos.
   Consider saying in the account bio that it shares news summaries with sources.
 
 Setup: create a bot with [@BotFather](https://t.me/BotFather) and put its token in
