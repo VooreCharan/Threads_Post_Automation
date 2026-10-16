@@ -4,7 +4,7 @@ import time
 
 import requests
 
-from . import alerts, config, net, state
+from . import alerts, config, net, redact, state
 
 logger = logging.getLogger(__name__)
 
@@ -124,3 +124,57 @@ def permalink(post_id: str) -> str | None:
     except Exception as e:
         logger.warning("Could not fetch the post link: %s", str(e)[:150])
         return None
+
+
+def diagnose() -> list[str]:
+    """Read-only health check of the Threads credentials, in plain English. It posts nothing, renews
+    nothing and changes nothing, so it is safe to run at any time (python -m app.cli --check-threads)."""
+    seeded = state.get("threads_token_seed") == config.THREADS_ACCESS_TOKEN
+    token = (state.get("threads_token") if seeded else None) or config.THREADS_ACCESS_TOKEN
+    uid = config.THREADS_USER_ID
+    if not token or not uid:
+        return ["THREADS_ACCESS_TOKEN and THREADS_USER_ID must both be set."]
+    try:
+        resp = net.get(f"{API}/v1.0/me", params={"fields": "id,username", "access_token": token}, timeout=20)
+        data = resp.json()
+    except Exception as e:
+        return [f"Could not reach the Threads API: {redact.redact(e)[:150]}", "Check the internet connection and try again."]
+
+    if resp.status_code == 200:
+        lines = [f"OK: the token belongs to @{data.get('username')} (id {data.get('id')})."]
+        if str(data.get("id")) != str(uid):
+            lines.append(f"PROBLEM: THREADS_USER_ID is {uid}, but the token belongs to account {data.get('id')}. "
+                         f"Set THREADS_USER_ID={data.get('id')}.")
+        else:
+            lines.append("OK: THREADS_USER_ID matches the token.")
+        try:
+            q = net.get(f"{API}/v1.0/{uid}/threads_publishing_limit",
+                        params={"fields": "quota_usage,config", "access_token": token}, timeout=20).json()
+            usage = (q.get("data") or [{}])[0]
+            lines.append(f"OK: publishing quota used {usage.get('quota_usage')} of "
+                         f"{(usage.get('config') or {}).get('quota_total', 250)} in the last 24 hours.")
+        except Exception:
+            pass
+        return lines
+
+    error = data.get("error", {}) if isinstance(data, dict) else {}
+    code, message = error.get("code"), redact.redact(error.get("message", ""))
+    lines = [f"Meta refused the request (HTTP {resp.status_code}, error {code}): {message}",
+             f"Reference for Meta support: fbtrace_id {error.get('fbtrace_id', 'n/a')}"]
+    if code == 190:
+        lines.append("MEANING: the token is expired, revoked or invalid. Generate a new long-lived token and set "
+                     "THREADS_ACCESS_TOKEN.")
+    elif code == 200 and "block" in message.lower():
+        lines += ["MEANING: Meta is blocking API access for this token. Because even reading your own profile is "
+                  "refused, the block is on the Meta APP or on the Threads ACCOUNT, not on posting and not on this bot.",
+                  "CHECK 1: open the Threads account in the Threads app: is it working normally, with no notice?",
+                  "CHECK 2: developers.facebook.com -> your app -> look for restriction or alert banners; confirm this "
+                  "account is a Threads Tester that has accepted the invite.",
+                  "CHECK 3: generate a brand-new token in the app's User Token Generator and run this check again: "
+                  "if only the old token is blocked, the new one works.",
+                  "If the app or account is restricted, use the review or appeal option Meta shows. Do not try to get "
+                  "around a block with another app or account."]
+    elif code in (10, 200):
+        lines.append("MEANING: the app lacks a permission. Re-create the token with threads_basic and "
+                     "threads_content_publish, and make sure the account is a Threads Tester.")
+    return lines

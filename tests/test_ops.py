@@ -271,3 +271,59 @@ def test_a_dry_run_never_touches_the_real_threads_token(monkeypatch):
     monkeypatch.setattr(threads, "ensure_fresh", lambda: pytest.fail("the token was renewed during a dry run"))
     monkeypatch.setattr(maintenance, "prewarm", lambda: 0)
     maintenance.run_cycle()
+
+
+# ---- the read-only Threads credential check (python -m app.cli --check-threads) --------------------------
+
+def diag(monkeypatch, fake_response, replies):
+    """Run threads.diagnose() with scripted API replies (in call order); return the printed lines as one text."""
+    monkeypatch.setattr(config, "THREADS_ACCESS_TOKEN", "THAA" + "x" * 30)
+    monkeypatch.setattr(config, "THREADS_USER_ID", "111")
+    queue = list(replies)
+
+    def fake_get(url, **k):
+        item = queue.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        status, data = item
+        return fake_response(json_data=data, status=status)
+    monkeypatch.setattr(net, "get", fake_get)
+    return "\n".join(threads.diagnose())
+
+
+def test_diagnose_healthy_account(monkeypatch, fake_response):
+    out = diag(monkeypatch, fake_response, [(200, {"id": "111", "username": "newnews"}),
+                                            (200, {"data": [{"quota_usage": 3, "config": {"quota_total": 250}}]})])
+    assert "@newnews" in out and "matches the token" in out and "3 of 250" in out and "PROBLEM" not in out
+
+
+def test_diagnose_spots_a_wrong_user_id(monkeypatch, fake_response):
+    out = diag(monkeypatch, fake_response, [(200, {"id": "222", "username": "other"}), (200, {})])
+    assert "PROBLEM" in out and "THREADS_USER_ID=222" in out
+
+
+def test_diagnose_explains_an_api_access_block(monkeypatch, fake_response):
+    blocked = {"error": {"message": "API access blocked.", "type": "OAuthException", "code": 200, "fbtrace_id": "A1B2"}}
+    out = diag(monkeypatch, fake_response, [(400, blocked)])
+    assert "API access blocked" in out and "fbtrace_id A1B2" in out
+    assert "APP or on the Threads ACCOUNT" in out and "Do not try to get around a block" in out
+
+
+def test_diagnose_explains_an_expired_token(monkeypatch, fake_response):
+    expired = {"error": {"message": "Error validating access token", "type": "OAuthException", "code": 190}}
+    assert "expired, revoked or invalid" in diag(monkeypatch, fake_response, [(401, expired)])
+
+
+def test_diagnose_survives_network_trouble(monkeypatch, fake_response):
+    assert "Could not reach the Threads API" in diag(monkeypatch, fake_response, [ConnectionError("down")])
+
+
+def test_diagnose_needs_settings(monkeypatch):
+    monkeypatch.setattr(config, "THREADS_ACCESS_TOKEN", "")
+    assert threads.diagnose() == ["THREADS_ACCESS_TOKEN and THREADS_USER_ID must both be set."]
+
+
+def test_diagnose_never_prints_the_token(monkeypatch, fake_response):
+    token = "THAA" + "x" * 30
+    out = diag(monkeypatch, fake_response, [(400, {"error": {"message": f"bad token {token}", "code": 200}})])
+    assert token not in out and "bad token ***" in out

@@ -15,9 +15,17 @@ def main() -> None:
     p.add_argument("--count", type=int, default=0, help="posts this run (default 1)")
     p.add_argument("--dry-run", action="store_true", help="generate posts but do not publish")
     p.add_argument("--check-llm", action="store_true", help="test every configured AI provider/model")
+    p.add_argument("--check-threads", action="store_true",
+                   help="read-only check of the Threads token and account (posts nothing)")
     p.add_argument("--migrate-db", metavar="SQLITE_FILE",
                    help="copy history/settings from a local bot.db into the Turso database in .env")
     args = p.parse_args()
+
+    if args.check_threads:
+        from . import threads
+        state.init()
+        print("\n".join(threads.diagnose()))
+        return
 
     if args.migrate_db:
         if not state.use_turso():

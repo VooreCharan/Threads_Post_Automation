@@ -167,6 +167,7 @@ Without Telegram and without posting anything:
 ```powershell
 python -m pytest                                   # the automated tests
 python -m app.cli --check-llm                      # which AI providers work
+python -m app.cli --check-threads                  # is the Threads token/account accepted? (read-only)
 python -m app.cli --dry-run --categories sports    # a real draft from live news, printed, not published
 ```
 

@@ -27,7 +27,7 @@ It runs for free: Render (host) + Turso (database) + free AI and photo APIs, wit
 | **AI** | A fallback chain of free providers (Groq, NVIDIA, Gemini, OpenRouter, Hugging Face, GitHub Models); each post is written, then fact-checked by a second AI pass |
 | **Publishing** | Official Threads API (`graph.threads.net`); article image → licensed stock photo → text only |
 | **Hosting (free, no card)** | Render web service + Turso database + UptimeRobot keep-alive (or Telegram webhook mode) |
-| **Code** | Python 3.14 · 19 modules, about 2,800 lines · 162 automated tests (about 1,500 lines) · GitHub Actions CI |
+| **Code** | Python 3.14 · 19 modules, about 2,800 lines · 169 automated tests (about 1,500 lines) · GitHub Actions CI |
 | **Design stance** | Safety first: human approval, fact-check, no repeats, no sensitive stories, slow start for a new account |
 
 ---
@@ -116,7 +116,7 @@ Dependencies point downwards only. `alerts.py` reaches the Telegram layer throug
 | **python-dotenv** | 1.0.1 | Loads `.env` for local runs | `config.py` |
 | **SQLite** (stdlib `sqlite3`) | built in | Local database file (`bot.db`) | `state.py` |
 | **Turso** (libSQL over its HTTP API) | hosted | Persistent database on Render, which has no disk | `state.py` |
-| **pytest** + **httpx** | 9.1.1 / 0.28.1 | 162 tests and the FastAPI test client | `tests/` |
+| **pytest** + **httpx** | 9.1.1 / 0.28.1 | 169 tests and the FastAPI test client | `tests/` |
 | **GitHub Actions** | | CI on Python 3.13 and 3.14, plus a committed-secrets scan | `.github/workflows/ci.yml` |
 | **Render** | free web service | Hosting | deployment |
 | **UptimeRobot** | free plan | Pings `/healthz` so the free service never sleeps (not needed in webhook mode) | deployment |
@@ -183,7 +183,7 @@ The same chain performs three jobs: **write** the post, **fact-check** it (and j
 | `cache.py` | 33 | Thread-safe expiring cache | |
 | `net.py` | 37 | One HTTP session per thread: connection reuse, safe retries, no cookies | requests |
 | `config.py` | 125 | Every setting, read from environment variables | python-dotenv |
-| `cli.py` | 45 | `--dry-run`, `--check-llm`, `--migrate-db` | argparse |
+| `cli.py` | 50 | `--dry-run`, `--check-llm`, `--migrate-db` | argparse |
 
 ---
 
@@ -321,7 +321,7 @@ start the new-account clock if `THREADS_USER_ID` is new → start Telegram → s
 
 ### 5.10 Build, test and deploy
 
-`git push` → GitHub Actions (compile, 162 tests on Python 3.13 and 3.14, secrets scan) → Render redeploys from
+`git push` → GitHub Actions (compile, 169 tests on Python 3.13 and 3.14, secrets scan) → Render redeploys from
 `main` (build `pip install -r requirements.txt`; start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
 
 ---
@@ -422,7 +422,7 @@ All settings are environment variables (a `.env` file locally, Render's Environm
 
 ## 11. Testing and CI
 
-- **162 tests** in `tests/` (about 8 seconds): safety rules, AI writing and fact-checking (with a scripted fake AI), article extraction, feeds, image order and publish fallbacks, state on SQLite **and** on a fake Turso server, secret redaction, the whole Telegram workflow (draft, approve, skip, double tap, limits, expiry, restart, strangers), alerts, token renewal, background upkeep and the webhook.
+- **169 tests** in `tests/` (about 8 seconds): safety rules, AI writing and fact-checking (with a scripted fake AI), article extraction, feeds, image order and publish fallbacks, state on SQLite **and** on a fake Turso server, secret redaction, the whole Telegram workflow (draft, approve, skip, double tap, limits, expiry, restart, strangers), alerts, token renewal, background upkeep and the webhook.
 - Tests cannot use the network or a real AI: any attempt fails the test.
 - Quality check: eight important behaviours were deliberately broken one at a time (double-post guard, daily cap, webhook secret, sensitive filter, fact-check, duplicate check, button ownership, topic tag), and the suite caught every one.
 - **CI** (GitHub Actions) runs on every push: compile check, the tests on Python 3.13 and 3.14, and a scan that fails the build if something resembling an API key is committed.
@@ -477,6 +477,7 @@ All settings are environment variables (a `.env` file locally, Render's Environm
 | Rehearse without posting | `DRY_RUN=true` (see "Testing on your own PC" in `README.md`) |
 | Run the tests | `pip install -r requirements-dev.txt` then `python -m pytest` |
 | Check which AI providers work | `python -m app.cli --check-llm` |
+| Check the Threads token and account (read-only, posts nothing) | `python -m app.cli --check-threads` |
 | Preview a draft in the terminal | `python -m app.cli --dry-run --categories sports` |
 | Move local history to Turso | `python -m app.cli --migrate-db bot.db` |
 | Make posts safer for copyright | `IMAGE_MODE=stock` |
