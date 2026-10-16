@@ -6,10 +6,11 @@ from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, Header, HTTPException
 
-from . import alerts, config, drafts, maintenance, safety, state, telegram_bot, threads
+from . import alerts, config, drafts, maintenance, redact, safety, state, telegram_bot, threads
 from .sources import FEEDS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+redact.install()  # no token or key ever appears in a log line
 
 
 @asynccontextmanager

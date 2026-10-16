@@ -3,12 +3,13 @@ import argparse
 import json
 import logging
 
-from . import bot, state
+from . import bot, redact, state
 from .sources import FEEDS
 
 
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    redact.install()
     p = argparse.ArgumentParser(description="News -> Threads agent")
     p.add_argument("--categories", default="", help=f"comma list from: {', '.join(FEEDS)}")
     p.add_argument("--count", type=int, default=0, help="posts this run (default 1)")

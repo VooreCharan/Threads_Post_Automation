@@ -13,7 +13,7 @@ from collections import deque
 
 import requests
 
-from . import bot, config, drafts, safety, state, threads, net
+from . import bot, config, drafts, net, redact, safety, state, threads
 from .sources import FEEDS
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def _call(method: str, http_timeout: int = 40, **params) -> dict:
 
 def send(chat_id: int | str, text: str, reply_markup: dict | None = None) -> dict | None:
     """Send a text message; returns Telegram's message object (or None on failure)."""
-    params = {"chat_id": chat_id, "text": text[:4000], "disable_web_page_preview": True}
+    params = {"chat_id": chat_id, "text": redact.redact(text)[:4000], "disable_web_page_preview": True}
     if reply_markup:
         params["reply_markup"] = reply_markup
     try:
