@@ -97,7 +97,16 @@ TELEGRAM_BOT_TOKEN = _env("TELEGRAM_BOT_TOKEN")
 TELEGRAM_OWNER_ID = _env("TELEGRAM_OWNER_ID")
 
 # Safety limits for the "post <category>" command (protect the account from looking like spam)
-DAILY_POST_LIMIT = int(_env("DAILY_POST_LIMIT", "10"))                    # posts per rolling 24 hours
+def _daily_limit(raw: str) -> int:
+    """Posts allowed per rolling 24 hours (default 15). Never above 240: Threads' own cap is 250 per 24 h."""
+    try:
+        n = int(raw)
+    except ValueError:
+        n = 15
+    return max(1, min(n, 240))
+
+
+DAILY_POST_LIMIT = _daily_limit(_env("DAILY_POST_LIMIT", "15"))           # posts per rolling 24 hours
 MIN_SECONDS_BETWEEN_POSTS = int(_env("MIN_SECONDS_BETWEEN_POSTS", "300"))  # pause between two posts
 # A new account starts slowly: 3 posts/day for its first 3 days, 5/day until day 7, then DAILY_POST_LIMIT.
 # "Day 0" is when the bot first sees a new THREADS_USER_ID.

@@ -149,7 +149,7 @@ publish immediately instead.
   drops any that are not clearly about the story, and generic filler like `#Trending` is never used.
 
 ### Limits that keep the account safe
-- At least `MIN_SECONDS_BETWEEN_POSTS` (300 s) between two posts, and at most `DAILY_POST_LIMIT` (10)
+- At least `MIN_SECONDS_BETWEEN_POSTS` (300 s) between two posts, and at most `DAILY_POST_LIMIT` (15)
   per rolling 24 hours; both are checked again when you tap Post.
 - **New-account warm-up**: when the bot first sees a new `THREADS_USER_ID` it allows only 3 posts a day for
   3 days and 5 a day until day 7, then the normal limit (`ACCOUNT_WARMUP`).

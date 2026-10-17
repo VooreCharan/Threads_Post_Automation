@@ -65,3 +65,21 @@ def test_minimum_pause_between_posts():
     assert safety.blocked_reason(check_pause=False) is None    # the pause is only checked at approval
     config.MIN_SECONDS_BETWEEN_POSTS = 0
     assert safety.blocked_reason() is None
+
+
+# ---- the daily limit setting ----------------------------------------------------------------------------
+
+@pytest.mark.parametrize("raw,expected", [("15", 15), ("", 15), ("abc", 15), ("0", 1), ("-4", 1), ("9999", 240), ("240", 240)])
+def test_daily_limit_parsing(raw, expected):
+    assert config._daily_limit(raw) == expected        # default 15, never below 1, never above Threads' cap
+
+
+def test_fifteen_posts_are_allowed_and_the_sixteenth_is_refused(monkeypatch):
+    monkeypatch.setattr(config, "DAILY_POST_LIMIT", config._daily_limit("15"))
+    monkeypatch.setattr(config, "MIN_SECONDS_BETWEEN_POSTS", 0)
+    for i in range(14):
+        state.record_post(f"https://x/{i}", "p", "india", f"t{i}")
+    assert safety.blocked_reason() is None                      # 14 posted: the 15th is allowed
+    state.record_post("https://x/14", "p", "india", "t14")
+    reason = safety.blocked_reason()
+    assert reason and "15/15" in reason                         # 15 posted: the 16th must wait

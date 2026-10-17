@@ -27,7 +27,7 @@ It runs for free: Render (host) + Turso (database) + free AI and photo APIs, wit
 | **AI** | A fallback chain of free providers (Groq, NVIDIA, Gemini, OpenRouter, Hugging Face, GitHub Models); each post is written, then fact-checked by a second AI pass |
 | **Publishing** | Official Threads API (`graph.threads.net`); article image → licensed stock photo → text only |
 | **Hosting (free, no card)** | Render web service + Turso database + UptimeRobot keep-alive (or Telegram webhook mode) |
-| **Code** | Python 3.14 · 19 modules, about 2,800 lines · 169 automated tests (about 1,500 lines) · GitHub Actions CI |
+| **Code** | Python 3.14 · 19 modules, about 2,800 lines · 177 automated tests (about 1,500 lines) · GitHub Actions CI |
 | **Design stance** | Safety first: human approval, fact-check, no repeats, no sensitive stories, slow start for a new account |
 
 ---
@@ -116,7 +116,7 @@ Dependencies point downwards only. `alerts.py` reaches the Telegram layer throug
 | **python-dotenv** | 1.0.1 | Loads `.env` for local runs | `config.py` |
 | **SQLite** (stdlib `sqlite3`) | built in | Local database file (`bot.db`) | `state.py` |
 | **Turso** (libSQL over its HTTP API) | hosted | Persistent database on Render, which has no disk | `state.py` |
-| **pytest** + **httpx** | 9.1.1 / 0.28.1 | 169 tests and the FastAPI test client | `tests/` |
+| **pytest** + **httpx** | 9.1.1 / 0.28.1 | 177 tests and the FastAPI test client | `tests/` |
 | **GitHub Actions** | | CI on Python 3.13 and 3.14, plus a committed-secrets scan | `.github/workflows/ci.yml` |
 | **Render** | free web service | Hosting | deployment |
 | **UptimeRobot** | free plan | Pings `/healthz` so the free service never sleeps (not needed in webhook mode) | deployment |
@@ -321,7 +321,7 @@ start the new-account clock if `THREADS_USER_ID` is new → start Telegram → s
 
 ### 5.10 Build, test and deploy
 
-`git push` → GitHub Actions (compile, 169 tests on Python 3.13 and 3.14, secrets scan) → Render redeploys from
+`git push` → GitHub Actions (compile, 177 tests on Python 3.13 and 3.14, secrets scan) → Render redeploys from
 `main` (build `pip install -r requirements.txt`; start `uvicorn app.main:app --host 0.0.0.0 --port $PORT`).
 
 ---
@@ -367,7 +367,7 @@ was rebuilt around **low volume, human approval and accuracy**.
 
 | Risk | Control |
 |---|---|
-| Spam-like volume | Only on command (no automatic loop); minimum 5 minutes between posts; 10 posts per rolling 24 h; **new-account warm-up**: 3 a day for 3 days, 5 a day until day 7 (restarts when `THREADS_USER_ID` changes) |
+| Spam-like volume | Only on command (no automatic loop); minimum 5 minutes between posts; 15 posts per rolling 24 h; **new-account warm-up**: 3 a day for 3 days, 5 a day until day 7 (restarts when `THREADS_USER_ID` changes) |
 | False statements | Full article text; "use only the article" prompt; a second AI **fact-check**; story skipped if unverifiable; nothing published if the checker is unavailable |
 | Wrong content slipping through | **Preview and approve**: you see the exact text, image and link, and tap to publish |
 | Repeats | Same URL; near-identical headline; the AI flags the same news event reported by another outlet (compared with your last 30 titles) |
@@ -396,7 +396,7 @@ All settings are environment variables (a `.env` file locally, Render's Environm
 | `TURSO_URL`, `TURSO_TOKEN` | empty | Use Turso instead of the local `bot.db` |
 | `REQUIRE_APPROVAL` | `true` | Preview and approve before posting |
 | `DRY_RUN` | `false` | Rehearsal: nothing is published |
-| `DAILY_POST_LIMIT` / `MIN_SECONDS_BETWEEN_POSTS` | `10` / `300` | Posting limits |
+| `DAILY_POST_LIMIT` / `MIN_SECONDS_BETWEEN_POSTS` | `15` / `300` | Posting limits |
 | `ACCOUNT_WARMUP` | `true` | Slow start for a new account |
 | `IMAGE_MODE` | `auto` | `auto`, `stock`, `article` or `off` |
 | `SKIP_SENSITIVE`, `INDIA_ONLY` | `true` | Content filters |
@@ -422,7 +422,7 @@ All settings are environment variables (a `.env` file locally, Render's Environm
 
 ## 11. Testing and CI
 
-- **169 tests** in `tests/` (about 8 seconds): safety rules, AI writing and fact-checking (with a scripted fake AI), article extraction, feeds, image order and publish fallbacks, state on SQLite **and** on a fake Turso server, secret redaction, the whole Telegram workflow (draft, approve, skip, double tap, limits, expiry, restart, strangers), alerts, token renewal, background upkeep and the webhook.
+- **177 tests** in `tests/` (about 8 seconds): safety rules, AI writing and fact-checking (with a scripted fake AI), article extraction, feeds, image order and publish fallbacks, state on SQLite **and** on a fake Turso server, secret redaction, the whole Telegram workflow (draft, approve, skip, double tap, limits, expiry, restart, strangers), alerts, token renewal, background upkeep and the webhook.
 - Tests cannot use the network or a real AI: any attempt fails the test.
 - Quality check: eight important behaviours were deliberately broken one at a time (double-post guard, daily cap, webhook secret, sensitive filter, fact-check, duplicate check, button ownership, topic tag), and the suite caught every one.
 - **CI** (GitHub Actions) runs on every push: compile check, the tests on Python 3.13 and 3.14, and a scan that fails the build if something resembling an API key is committed.
