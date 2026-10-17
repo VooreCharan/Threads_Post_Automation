@@ -32,26 +32,6 @@ def test_ordinary_news_is_not_caught(headline):
     assert safety.sensitive_match(headline) is None
 
 
-def test_warmup_limits_follow_account_age():
-    config.ACCOUNT_WARMUP = True
-    state.put("account_since", str(time.time()))
-    assert safety.daily_limit_now() == 3                       # first 3 days
-    state.put("account_since", str(time.time() - 4 * 86400))
-    assert safety.daily_limit_now() == 5                       # until day 7
-    state.put("account_since", str(time.time() - 8 * 86400))
-    assert safety.daily_limit_now() == config.DAILY_POST_LIMIT
-
-
-def test_a_new_account_id_restarts_the_warmup(monkeypatch):
-    safety.init_account()
-    state.put("account_since", str(time.time() - 30 * 86400))
-    safety.init_account()                                      # same account: nothing changes
-    assert safety.account_age_days() > 29
-    monkeypatch.setattr(config, "THREADS_USER_ID", "acct-2")
-    safety.init_account()
-    assert safety.account_age_days() < 0.01
-
-
 def test_daily_cap_blocks_with_a_reason():
     for i in range(config.DAILY_POST_LIMIT):
         state.record_post(f"https://x/{i}", "p", "india", f"t{i}")

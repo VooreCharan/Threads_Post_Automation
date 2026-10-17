@@ -106,12 +106,8 @@ def _parse_category(word: str) -> str | None:
 
 def _status_text() -> str:
     n = state.posts_in_window(86400)[0]
-    limit = safety.daily_limit_now()
-    age = safety.account_age_days()
     lines = (["🧪 DRY RUN mode: approving a draft publishes nothing"] if config.DRY_RUN else [])
-    lines += [f"Posts in the last 24h: {n} / {limit}"
-             + (f" (new-account warm-up, day {int(age) + 1}; normal limit {config.DAILY_POST_LIMIT})"
-                if limit < config.DAILY_POST_LIMIT else ""),
+    lines += [f"Posts in the last 24h: {n} / {config.DAILY_POST_LIMIT}",
              f"Minimum pause between posts: {config.MIN_SECONDS_BETWEEN_POSTS // 60} min",
              f"Approval before posting: {'ON' if config.REQUIRE_APPROVAL else 'OFF'}"
              f" | Waiting drafts: {drafts.count()}",

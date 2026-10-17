@@ -26,7 +26,6 @@ def isolated(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "REQUIRE_APPROVAL", True)
     monkeypatch.setattr(config, "DAILY_POST_LIMIT", 10)
     monkeypatch.setattr(config, "MIN_SECONDS_BETWEEN_POSTS", 300)
-    monkeypatch.setattr(config, "ACCOUNT_WARMUP", False)
     monkeypatch.setattr(config, "MAX_PENDING_DRAFTS", 3)
     monkeypatch.setattr(config, "DRAFT_TTL_MINUTES", 60)
     monkeypatch.setattr(config, "MIN_ARTICLE_CHARS", 250)

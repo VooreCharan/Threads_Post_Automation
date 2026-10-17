@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import Body, FastAPI, Header, HTTPException
 
-from . import alerts, config, drafts, maintenance, redact, safety, state, telegram_bot, threads
+from . import alerts, config, drafts, maintenance, redact, state, telegram_bot, threads
 from .sources import FEEDS
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -16,7 +16,6 @@ redact.install()  # no token or key ever appears in a log line
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     state.init()
-    safety.init_account()  # a new THREADS_USER_ID (a new account) restarts the slow-start limits
     mode = telegram_bot.start()  # runs inside this process: deploy exactly one instance
     maintenance.start()
     if config.ALERT_ON_START:
@@ -39,7 +38,7 @@ def status():
     return {
         "categories": list(FEEDS),
         "posts_last_24h": state.posts_in_window(86400)[0],
-        "daily_limit": safety.daily_limit_now(),
+        "daily_limit": config.DAILY_POST_LIMIT,
         "require_approval": config.REQUIRE_APPROVAL,
         "telegram_mode": config.TELEGRAM_MODE,
         "threads_token_days_left": (round(d, 1) if (d := threads.days_left()) is not None else None),

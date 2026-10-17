@@ -81,7 +81,7 @@ Telegram poller and the maintenance loop.
 │                maintenance.py    pre-reading, token renewal, health checks    │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Intelligence   llm.py            writer + fact-checker + photo judge          │
-│                safety.py         sensitive filter · warm-up · limits          │
+│                safety.py         sensitive filter · limits                    │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │ Content        feeds.py · sources.py   RSS discovery · India filter           │
 │                article.py              full article text                      │
@@ -170,7 +170,7 @@ The same chain performs three jobs: **write** the post, **fact-check** it (and j
 | `bot.py` | 277 | `_build` (the checking funnel), `make_draft`, `approve`, `reject`, `publish_draft` (with fallbacks), `run_once` | threading lock |
 | `drafts.py` | 85 | Pending drafts in the state store: add, get, pop (consume), expire, count | JSON in `kv` |
 | `llm.py` | 473 | Provider chain, pacing and cooldowns, writer prompt, fact-check, photo judge, caches, `compose` (post layout) | requests, google-genai |
-| `safety.py` | 86 | Sensitive-topic regex, new-account warm-up, daily cap, minimum pause | regex |
+| `safety.py` | 86 | Sensitive-topic regex, daily cap, minimum pause | regex |
 | `feeds.py` | 95 | Fetch and normalise RSS, drop old items, India keyword filter for mixed feeds, 15-minute cache | feedparser |
 | `sources.py` | 69 | The 30 feeds by category, and the India keyword list | |
 | `article.py` | 210 | Full article text: JSON-LD → HTML paragraphs → summary; promo removal; prefetch in parallel; 30-minute cache | BeautifulSoup |
@@ -334,7 +334,7 @@ start the new-account clock if `THREADS_USER_ID` is new → start Telegram → s
 |---|---|---|
 | `posted` | `url` (PK), `post_id`, `category`, `posted_at`, `title` | Everything published: duplicate prevention, daily cap, "same event" checks |
 | `skipped` | `url` (PK), `reason`, `skipped_at` | Stories rejected (sensitive, not India, duplicate, thin text, owner skipped) so they are not re-checked |
-| `kv` | `key` (PK), `value` | Settings and state: `threads_token`, `threads_token_seed`, `threads_token_expires_at`, `account_id`, `account_since`, `drafts` (JSON), `alert:<kind>` cooldown times |
+| `kv` | `key` (PK), `value` | Settings and state: `threads_token`, `threads_token_seed`, `threads_token_expires_at`, `drafts` (JSON), `alert:<kind>` cooldown times |
 
 **In memory** (rebuilt from the database at start-up): the sets of posted and skipped URLs (so choosing
 candidates costs no database call per story), the last 3 days of titles, and the times of recent posts.
@@ -367,7 +367,7 @@ was rebuilt around **low volume, human approval and accuracy**.
 
 | Risk | Control |
 |---|---|
-| Spam-like volume | Only on command (no automatic loop); minimum 5 minutes between posts; 15 posts per rolling 24 h; **new-account warm-up**: 3 a day for 3 days, 5 a day until day 7 (restarts when `THREADS_USER_ID` changes) |
+| Spam-like volume | Only on command (no automatic loop); minimum 5 minutes between posts; flat 15 posts per rolling 24 h from day one (no warm-up) |
 | False statements | Full article text; "use only the article" prompt; a second AI **fact-check**; story skipped if unverifiable; nothing published if the checker is unavailable |
 | Wrong content slipping through | **Preview and approve**: you see the exact text, image and link, and tap to publish |
 | Repeats | Same URL; near-identical headline; the AI flags the same news event reported by another outlet (compared with your last 30 titles) |
@@ -397,7 +397,6 @@ All settings are environment variables (a `.env` file locally, Render's Environm
 | `REQUIRE_APPROVAL` | `true` | Preview and approve before posting |
 | `DRY_RUN` | `false` | Rehearsal: nothing is published |
 | `DAILY_POST_LIMIT` / `MIN_SECONDS_BETWEEN_POSTS` | `15` / `300` | Posting limits |
-| `ACCOUNT_WARMUP` | `true` | Slow start for a new account |
 | `IMAGE_MODE` | `auto` | `auto`, `stock`, `article` or `off` |
 | `SKIP_SENSITIVE`, `INDIA_ONLY` | `true` | Content filters |
 | `MIN_ARTICLE_CHARS` / `ARTICLE_CHARS` | `250` / `4500` | Least text a story needs / how much the AI reads |
@@ -463,7 +462,7 @@ All settings are environment variables (a `.env` file locally, Render's Environm
 2. **X's API became paid** and browser login automation is against its terms, so posting moved to **Threads** (free, official API).
 3. Rebuilt as a deployable service with a **free AI fallback chain**, India-only filtering, categories, images (article, then stock), hashtags.
 4. Added **Telegram control**, first a continuous "start/stop posting" loop. That volume got the first account **permanently disabled**.
-5. Redesigned for safety: **on-demand commands, preview and approve, fact-check, duplicate and sensitive filters, limits and warm-up**.
+5. Redesigned for safety: **on-demand commands, preview and approve, fact-check, duplicate and sensitive filters, and a flat daily limit**.
 6. Moved hosting to **Render + Turso + UptimeRobot** (no card), then added speed-ups (pre-reading, caching), alerts, optional webhook mode, a proper **test suite and CI**.
 
 ---

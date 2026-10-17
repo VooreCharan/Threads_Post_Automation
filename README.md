@@ -15,7 +15,7 @@ app/llm.py           AI provider chain: writes the post, fact-checks it, judges 
 app/images.py        article image, or a relevant stock photo (Pexels / Pixabay)
 app/bot.py           builds drafts from the newest postable story; publishes approved drafts
 app/drafts.py        drafts waiting for your approval (survive restarts, expire)
-app/safety.py        sensitive-story filter, new-account warm-up, daily cap and pause
+app/safety.py        sensitive-story filter, daily cap and pause
 app/telegram_bot.py  Telegram commands, preview with buttons, polling or webhook
 app/threads.py       Threads API publish + token renewal
 app/maintenance.py   background upkeep: pre-reads stories, renews the token, checks the database
@@ -151,8 +151,7 @@ publish immediately instead.
 ### Limits that keep the account safe
 - At least `MIN_SECONDS_BETWEEN_POSTS` (300 s) between two posts, and at most `DAILY_POST_LIMIT` (15)
   per rolling 24 hours; both are checked again when you tap Post.
-- **New-account warm-up**: when the bot first sees a new `THREADS_USER_ID` it allows only 3 posts a day for
-  3 days and 5 a day until day 7, then the normal limit (`ACCOUNT_WARMUP`).
+- The limit is flat from day one: no slow start for new accounts.
 - Everything is posted through the official Threads API, always with the article link and the publisher
   named once. Article photos are credited to the publisher; set `IMAGE_MODE=stock` to avoid publishers' photos.
   Consider saying in the account bio that it shares news summaries with sources.

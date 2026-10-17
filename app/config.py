@@ -108,9 +108,6 @@ def _daily_limit(raw: str) -> int:
 
 DAILY_POST_LIMIT = _daily_limit(_env("DAILY_POST_LIMIT", "15"))           # posts per rolling 24 hours
 MIN_SECONDS_BETWEEN_POSTS = int(_env("MIN_SECONDS_BETWEEN_POSTS", "300"))  # pause between two posts
-# A new account starts slowly: 3 posts/day for its first 3 days, 5/day until day 7, then DAILY_POST_LIMIT.
-# "Day 0" is when the bot first sees a new THREADS_USER_ID.
-ACCOUNT_WARMUP = _env("ACCOUNT_WARMUP", "true").lower() in ("1", "true", "yes")
 
 # Preview and approve: "post <category>" only prepares a draft in Telegram; nothing is published until
 # you tap the "Post to Threads" button. Set to false to publish immediately.

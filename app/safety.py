@@ -1,5 +1,4 @@
-"""Rules that keep an automated news account safe: no sensitive stories, a slow start for a new
-account, and posting limits.
+"""Rules that keep an automated news account safe: no sensitive stories and posting limits.
 
 These are deliberately conservative. They exist to keep the account within Threads' Community
 Standards (no graphic or harmful content, no spam-like posting) and are all configurable in config.py.
@@ -41,41 +40,13 @@ def sensitive_match(*texts: str) -> str | None:
 
 # ---- the account and its posting limits --------------------------------------------------------
 
-def init_account() -> None:
-    """Remember when this Threads account was first seen, to apply the new-account warm-up. A new
-    THREADS_USER_ID (a new account) restarts the warm-up."""
-    uid = config.THREADS_USER_ID
-    if uid and state.get("account_id") != uid:
-        state.put("account_id", uid)
-        state.put("account_since", str(time.time()))
-
-
-def account_age_days() -> float | None:
-    since = state.get("account_since")
-    return (time.time() - float(since)) / 86400 if since else None
-
-
-def daily_limit_now() -> int:
-    """Posts allowed per rolling 24 hours: slow for a new account, then DAILY_POST_LIMIT."""
-    limit = config.DAILY_POST_LIMIT
-    if config.ACCOUNT_WARMUP:
-        age = account_age_days()
-        if age is not None:
-            if age < 3:
-                limit = min(limit, 3)
-            elif age < 7:
-                limit = min(limit, 5)
-    return limit
-
-
 def blocked_reason(check_pause: bool = True) -> str | None:
     """Why a post must wait (daily cap or minimum pause), or None if posting is fine."""
-    limit = daily_limit_now()
+    limit = config.DAILY_POST_LIMIT
     n, oldest = state.posts_in_window(24 * 3600)
     if n >= limit and oldest is not None:
         resume = time.strftime("%H:%M", time.localtime(oldest + 24 * 3600 + 60))
-        why = " (new-account warm-up)" if limit < config.DAILY_POST_LIMIT else ""
-        return f"Daily limit reached ({n}/{limit} posts in the last 24 hours{why}). Try again after about {resume}."
+        return f"Daily limit reached ({n}/{limit} posts in the last 24 hours). Try again after about {resume}."
     if check_pause:
         last = state.last_post_time()
         if last is not None:

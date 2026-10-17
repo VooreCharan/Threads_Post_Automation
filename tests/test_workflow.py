@@ -243,14 +243,12 @@ def test_cancel_discards_all_waiting_drafts(world):
 
 # ---- limits -------------------------------------------------------------------------------------------
 
-def test_warmup_caps_a_new_account_and_says_why(world):
-    config.ACCOUNT_WARMUP = True
-    state.put("account_since", str(time.time()))
-    assert safety.daily_limit_now() == 3
-    for i in range(3):
+def test_daily_cap_is_flat_from_day_one_and_says_why(world):
+    for i in range(config.DAILY_POST_LIMIT):
         state.record_post(f"https://filler/{i}", "p", "sports", f"Filler {i}")
     say(world, "post sports")
-    assert "warm-up" in texts(world)[0]
+    assert f"{config.DAILY_POST_LIMIT}/{config.DAILY_POST_LIMIT}" in texts(world)[0]
+    assert "warm-up" not in texts(world)[0]
 
 
 def test_unknown_or_missing_category_shows_the_list(world):
